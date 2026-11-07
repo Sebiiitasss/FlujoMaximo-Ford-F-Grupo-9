@@ -5,7 +5,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Modelo de Red - Algoritmo de Ford-Fulkerson</title>
-  <meta name="description" content="Herramienta interactiva para visualizar y resolver problemas de flujo máximo usando el algoritmo de Ford-Fulkerson. Construye grafos, encuentra caminos aumentantes y calcula el flujo óptimo paso a paso.">
+  <meta name="description"
+    content="Herramienta interactiva para visualizar y resolver problemas de flujo máximo usando el algoritmo de Ford-Fulkerson. Construye grafos, encuentra caminos aumentantes y calcula el flujo óptimo paso a paso.">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -45,15 +46,15 @@
       <div id="contenedor-manual" class="cuadro-interno">
         <div class="form-group">
           <label for="num-nodo-inicial">Nodo Inicial:</label>
-          <input type="number" id="num-nodo-inicial" min="1" max="7" value="1">
+          <input type="text" id="num-nodo-inicial" value="1">
         </div>
         <div class="form-group">
           <label for="num-nodo-final">Nodo Final:</label>
-          <input type="number" id="num-nodo-final" min="1" max="7" value="2">
+          <input type="text" id="num-nodo-final" value="2">
         </div>
         <div class="form-group">
           <label for="num-peso">Capacidad (1-9999):</label>
-          <input type="number" id="num-peso" min="1" max="9999" value="1">
+          <input type="number" id="num-peso" min="1" max="9999" value="10">
         </div>
         <div class="form-group">
           <button id="btn-conectar" class="btn btn-primario">Conectar</button>
@@ -67,23 +68,37 @@
       <div id="contenedor-fuente-sumidero">
         <div class="form-group">
           <label for="num-fuente">Fuente:</label>
-          <input type="number" id="num-fuente" min="1" max="7">
+          <input type="text" id="num-fuente">
         </div>
         <div class="form-group">
           <label for="num-sumidero">Sumidero:</label>
-          <input type="number" id="num-sumidero" min="1" max="7">
+          <input type="text" id="num-sumidero">
         </div>
-        <div class="form-group">
+        <div class="form-group botones-grupo">
           <button id="btn-aceptar-fuente-sumidero" class="btn btn-primario">Aceptar</button>
+          <button id="btn-auto-canonico" class="btn btn-secundario"
+            title="Unir fuentes o sumideros independientes mediante nodos ficticios S y T">Unir Nodos Ficticios</button>
         </div>
       </div>
+    </section>
+
+    <!-- Cuadro: Diagnóstico -->
+    <section id="seccion-diagnostico" class="cuadro-seccion">
+      <div class="diagnostico-header">
+        <h3 class="cuadro-titulo">Diagnóstico</h3>
+        <span id="badge-estado-red" class="badge-estado badge-verde">Válida</span>
+      </div>
+      <div id="diagnostico-mensaje" class="diagnostico-texto">
+        Red válida para ejecutar Ford-Fulkerson.
+      </div>
+      <ul id="lista-alertas-red" class="diagnostico-errores"></ul>
     </section>
 
     <!-- Cuadro: Algoritmo de Ford-Fulkerson -->
     <section id="seccion-ford" class="cuadro-seccion" style="display: none;">
       <h3 class="cuadro-titulo">Algoritmo de Ford-Fulkerson</h3>
       <p id="instruccion-ford" class="instruccion-texto">
-        Halla un camino de Fuente hacia Sumidero (presiona click sobre los nodos)
+        Halla un camino de Fuente al Sumidero
       </p>
 
       <div class="form-group camino-info">
@@ -164,7 +179,15 @@
           <marker id="punto-inicio-rojo" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
             <circle cx="5" cy="5" r="3.5" fill="#c62828" />
           </marker>
+
+          <marker id="flecha-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#0d9488" />
+          </marker>
+          <marker id="punto-inicio-teal" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6">
+            <circle cx="5" cy="5" r="3.5" fill="#0d9488" />
+          </marker>
         </defs>
+        <g id="grupo-corte-minimo"></g>
         <g id="grupo-aristas"></g>
         <g id="grupo-nodos"></g>
       </svg>
@@ -181,6 +204,10 @@
           <span class="leyenda-color" style="background:#c62828;"></span>
           <span>Sumidero</span>
         </div>
+        <div class="leyenda-item" data-tipo="ficticio">
+          <span class="leyenda-color" style="background:#0d9488; border: 2px dashed #ffffff;"></span>
+          <span>Ficticio (S / T)</span>
+        </div>
         <div class="leyenda-item" data-tipo="seleccionado">
           <span class="leyenda-color" style="background:#8e24aa;"></span>
           <span>Seleccionado</span>
@@ -190,6 +217,16 @@
           <span>Normal</span>
         </div>
         <div class="leyenda-separador"></div>
+        <div class="leyenda-item" data-tipo="arista-ficticia">
+          <span class="leyenda-linea"
+            style="background: repeating-linear-gradient(90deg, #0d9488, #0d9488 4px, transparent 4px, transparent 8px);"></span>
+          <span>Arista Ficticia (∞)</span>
+        </div>
+        <div class="leyenda-item" data-tipo="corte-minimo">
+          <span class="leyenda-linea"
+            style="background: repeating-linear-gradient(90deg, #dc2626, #dc2626 4px, transparent 4px, transparent 8px);"></span>
+          <span>Corte Mínimo (S, T)</span>
+        </div>
         <div class="leyenda-item" data-tipo="sin-flujo">
           <span class="leyenda-linea" style="background:#333333;"></span>
           <span>Sin flujo</span>
@@ -213,10 +250,14 @@
     <div id="nodo-tooltip" class="nodo-tooltip">
       <div class="tooltip-header">Nodo <span id="tooltip-nodo-id">-</span></div>
       <div class="tooltip-body">
-        <div class="tooltip-row"><span class="tooltip-label">Tipo:</span> <span id="tooltip-nodo-tipo">Normal</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Aristas salientes:</span> <span id="tooltip-nodo-salientes">0</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Aristas entrantes:</span> <span id="tooltip-nodo-entrantes">0</span></div>
-        <div class="tooltip-row"><span class="tooltip-label">Flujo neto:</span> <span id="tooltip-nodo-flujo">0</span></div>
+        <div class="tooltip-row"><span class="tooltip-label">Tipo:</span> <span id="tooltip-nodo-tipo">Normal</span>
+        </div>
+        <div class="tooltip-row"><span class="tooltip-label">Aristas salientes:</span> <span
+            id="tooltip-nodo-salientes">0</span></div>
+        <div class="tooltip-row"><span class="tooltip-label">Aristas entrantes:</span> <span
+            id="tooltip-nodo-entrantes">0</span></div>
+        <div class="tooltip-row"><span class="tooltip-label">Flujo neto:</span> <span id="tooltip-nodo-flujo">0</span>
+        </div>
       </div>
     </div>
   </main>

@@ -20,14 +20,27 @@ Ideal para estudiantes y docentes de **Investigación de Operaciones**, **Optimi
 
 ## ✨ Características Principales
 
-- **🔢 Configuración Dinámica de Vértices:**
-  - Soporta entre 7 y 16 nodos distribuidos automáticamente en disposición circular mediante cálculo trigonométrico.
+- **🔢 Configuración Dinámica de Vértices y Layout Horizontal:**
+  - Soporta entre 7 y 16 nodos distribuidos ordenadamente de izquierda a derecha ($X_{\min}$ para fuentes, $X_{\max}$ para sumideros) con arrastre interactivo (*Drag & Drop*).
+- **🌟 Reducción Canónica Multifuente y Multisumidero:**
+  - **Detección Automática:** Analiza grados ($\text{in-degree} = 0 \land \text{out-degree} > 0$ para fuentes; $\text{out-degree} = 0 \land \text{in-degree} > 0$ para sumideros).
+  - **Inyección de Nodos Ficticios:** Si se detectan $\ge 2$ fuentes, agrega automáticamente una **Fuente Ficticia ($S$)** conectada a cada fuente original con capacidad infinita ($\infty$). Si se detectan $\ge 2$ sumideros, agrega automáticamente un **Sumidero Ficticio ($T$)** con aristas desde cada sumidero original con capacidad infinita ($\infty$).
+  - **Renderizado Diferenciado:** Estilo visual con bordes y líneas discontinuas (`stroke-dasharray="6 4"`) y etiqueta `flujo/∞`.
+  - **Resolución Formal:** Ejecución de Ford-Fulkerson entre $S$ y $T$.
+- **🔗 Generación Aleatoria Estructurada:**
+  - Construcción por capas sin cruces caóticos, garantizando que todo nodo intermedio tenga al menos una entrada y una salida, evitando atajos directos triviales desde la fuente al sumidero.
+- **🛡️ Contenedor de Diagnóstico:**
+  - Evalúa e indica de forma directa si la red es **Válida** o **Inválida**, listando puntualmente errores como falta de camino, nodos aislados o callejones sin salida.
+- **✂️ Cálculo y Representación Visual del Corte Mínimo:**
+  - Al agotar los caminos aumentantes, determina la partición $(S, T)$ de la red residual: $S$ (alcanzables) y $T$ (no alcanzables).
+  - **Línea de corte en el canvas:** Traza una línea divisoria discontinua en el SVG separando $S$ de $T$.
+  - **Verificación teórica:** Comprueba formalmente que $|f| = c(S, T) = \sum_{u \in S, v \in T} c(u, v)$ sustentando el óptimo global.
 - **🔗 Creación Flexible de Aristas:**
   - **Modo Manual:** Ingreso de nodo origen, nodo destino y capacidad/peso (1 - 9999).
-  - **Modo Aleatorio:** Generación procedural de grafos dirigidos conectados sin ciclos directos hacia adelante.
-  - **Soporte de Aristas Bidireccionales:** Curvatura automática mediante curvas Bézier cuadráticas (`Q cx cy x2 y2`) para evitar solapamientos entre aristas opuestas.
+  - **Modo Aleatorio:** Generación estructurada por niveles orientados.
+  - **Soporte de Aristas Bidireccionales:** Curvatura automática mediante curvas Bézier cuadráticas (`Q cx cy x2 y2`).
 - **🎯 Definición de Fuente y Sumidero:**
-  - Validación de conectividad mediante **BFS** (*Breadth-First Search*) y detección preventiva de ciclos dirigidos mediante **DFS** (*Depth-First Search*).
+  - Modos manual y auto-canónico, con validación de conectividad mediante **BFS** y detección de ciclos con **DFS**.
 - **🕹️ Aprendizaje Interactivo del Algoritmo:**
   - Selección de caminos aumentantes haciendo clic directamente sobre los nodos en el SVG (resaltado morado).
   - Validación de caminos válidos y cálculo del cuello de botella (capacidad residual mínima).
@@ -39,10 +52,8 @@ Ideal para estudiantes y docentes de **Investigación de Operaciones**, **Optimi
     - 🟠 **Naranja:** Saturación media (`< 100%`).
     - 🔴 **Rojo:** Arista saturada (`100%`).
 - **📊 Resumen y Finalización Automática:**
-  - Verificación por BFS para detectar cuándo ya no existen caminos residuales disponibles.
-  - Reporte final con el valor del **Flujo Máximo total alcanzado** y el historial ordenado de todos los caminos aumentantes empleados.
-- **⚠️ Sistema de Alertas y Validaciones:**
-  - Modales de advertencia amigables ante entradas inválidas, capacidades fuera de rango o nodos desconectados.
+  - Verificación por BFS para detectar fin de algoritmo.
+  - Reporte final con flujo máximo total alcanzado e historial ordenado de caminos con opción de replay.
 
 ---
 

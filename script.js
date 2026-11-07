@@ -1,8 +1,12 @@
-const COLORES = ['gray', '#2e7d32', '#c62828'];
+const COLORES = ['#64748b', '#2e7d32', '#c62828'];
+const COLOR_MORADO = '#8e24aa';
+const COLOR_TEAL_FICTICIO = '#0d9488';
+const COLOR_ROSA_FICTICIO = '#e11d48';
 
 const inputVertices = document.getElementById('num-vertices');
 const btnAplicar = document.getElementById('btn-aplicar');
 const svgRed = document.getElementById('svg-red');
+const grupoCorteMinimo = document.getElementById('grupo-corte-minimo');
 const grupoAristas = document.getElementById('grupo-aristas');
 const grupoNodos = document.getElementById('grupo-nodos');
 
@@ -23,8 +27,11 @@ const btnConectar = document.getElementById('btn-conectar');
 const inputFuente = document.getElementById('num-fuente');
 const inputSumidero = document.getElementById('num-sumidero');
 const btnAceptarFuenteSumidero = document.getElementById('btn-aceptar-fuente-sumidero');
+const btnAutoCanonico = document.getElementById('btn-auto-canonico');
 
-const COLOR_MORADO = '#8e24aa';
+const badgeEstadoRed = document.getElementById('badge-estado-red');
+const diagnosticoMensaje = document.getElementById('diagnostico-mensaje');
+const listaAlertasRed = document.getElementById('lista-alertas-red');
 
 const seccionFord = document.getElementById('seccion-ford');
 const instruccionFord = document.getElementById('instruccion-ford');
@@ -39,64 +46,457 @@ const panelFinalFlujo = document.getElementById('panel-final-flujo');
 const textoResumenFinal = document.getElementById('texto-resumen-final');
 const listaCaminosRecorridos = document.getElementById('lista-caminos-recorridos');
 
+const seccionHistorial = document.getElementById('seccion-historial');
+const historialInteractivo = document.getElementById('historial-interactivo');
+const btnReplayTodo = document.getElementById('btn-replay-todo');
+
+const nodoTooltip = document.getElementById('nodo-tooltip');
+const tooltipNodoId = document.getElementById('tooltip-nodo-id');
+const tooltipNodoTipo = document.getElementById('tooltip-nodo-tipo');
+const tooltipNodoSalientes = document.getElementById('tooltip-nodo-salientes');
+const tooltipNodoEntrantes = document.getElementById('tooltip-nodo-entrantes');
+const tooltipNodoFlujo = document.getElementById('tooltip-nodo-flujo');
+
+const toastContainer = document.getElementById('toast-container');
+const tutorialOverlay = document.getElementById('tutorial-overlay');
+const tutorialTitulo = document.getElementById('tutorial-titulo');
+const tutorialContenido = document.getElementById('tutorial-contenido');
+const tutorialPasoNum = document.getElementById('tutorial-paso-num');
+const tutorialProgressBar = document.getElementById('tutorial-progress-bar');
+const btnTutorialSiguiente = document.getElementById('btn-tutorial-siguiente');
+const btnTutorialAnterior = document.getElementById('btn-tutorial-anterior');
+const btnTutorialOmitir = document.getElementById('btn-tutorial-omitir');
+const btnTutorial = document.getElementById('btn-tutorial');
+
+let numVerticesBase = 7;
 let posicionesNodos = [];
 let aristas = [];
 let nodoFuente = null;
 let nodoSumidero = null;
+let fuentesRealesDetectadas = [];
+let sumiderosRealesDetectados = [];
 
 let caminoSeleccionado = [];
 let flujoTotal = 0;
 let historialRecorridos = [];
 let algoritmoTerminado = false;
 
-// Determina el color y nombre de estilo de una arista según su nivel de flujo y capacidad.
-function obtenerColorArista(flujo, peso) {
-  if (flujo === 0) return { nombre: 'negro', hex: '#333333' };
-  const ratio = flujo / peso;
+let nodoDragId = null;
+let isDragging = false;
+let dragStartPos = null;
+
+// Busca un nodo por su identificador único dentro de la colección.
+function obtenerNodo(id) {
+  if (id === null || id === undefined || String(id).trim() === '') return null;
+  const strId = String(id).trim().toUpperCase();
+  const match = posicionesNodos.find(n => String(n.id).toUpperCase() === strId || String(n.label || '').toUpperCase() === strId);
+  if (match) return match;
+  const num = Number(strId);
+  return (!isNaN(num) && num >= 1 && num <= posicionesNodos.length) ? posicionesNodos[num - 1] : null;
+}
+
+// Devuelve el color y nombre de estilo de una arista según su relación flujo/capacidad.
+function obtenerColorArista(flujo, peso, isFictitious = false) {
+  if (flujo === 0) return isFictitious ? { nombre: 'teal', hex: '#0d9488' } : { nombre: 'negro', hex: '#333333' };
+  const ratio = (peso === Infinity || peso <= 0) ? (flujo > 0 ? 0.3 : 0) : (flujo / peso);
   if (ratio <= 0.3) return { nombre: 'verde', hex: '#2e7d32' };
   if (ratio < 1) return { nombre: 'naranja', hex: '#f57c00' };
   return { nombre: 'rojo', hex: '#c62828' };
 }
 
-// Muestra el modal de advertencia en pantalla con un título y mensaje específico.
+// Despliega la ventana modal de advertencia con un mensaje específico.
 function mostrarAdvertencia(mensaje, titulo = 'Restricción') {
   tituloAdvertencia.textContent = titulo;
   mensajeAdvertencia.textContent = mensaje;
   overlayAdvertencia.style.display = 'flex';
 }
 
-// Oculta el modal de advertencia.
+// Oculta la ventana modal de advertencia.
 function ocultarAdvertencia() {
   overlayAdvertencia.style.display = 'none';
 }
 
 btnCerrarAdvertencia.addEventListener('click', ocultarAdvertencia);
-
 btnManual.addEventListener('click', () => {
-  const visible = contenedorManual.style.display === 'flex';
-  contenedorManual.style.display = visible ? 'none' : 'flex';
+  contenedorManual.style.display = contenedorManual.style.display === 'flex' ? 'none' : 'flex';
 });
 
-// Valida la cantidad de vértices, reinicia las variables del grafo y distribuye los nodos circularmente.
+// Calcula los grados de entrada y salida de los nodos reales para identificar fuentes y sumideros.
+function analizarGradosRedBase() {
+  const nodosReales = posicionesNodos.filter(n => !n.isFictitious);
+  const aristasReales = aristas.filter(a => !a.isFictitious);
+  const inDegree = new Map();
+  const outDegree = new Map();
+
+  nodosReales.forEach(n => { inDegree.set(String(n.id), 0); outDegree.set(String(n.id), 0); });
+  aristasReales.forEach(a => {
+    const orig = String(a.origen);
+    const dest = String(a.destino);
+    if (outDegree.has(orig)) outDegree.set(orig, outDegree.get(orig) + 1);
+    if (inDegree.has(dest)) inDegree.set(dest, inDegree.get(dest) + 1);
+  });
+
+  const fuentes = [];
+  const sumideros = [];
+  const aislados = [];
+  const callejones = [];
+
+  nodosReales.forEach(n => {
+    const sId = String(n.id);
+    const indeg = inDegree.get(sId) || 0;
+    const outdeg = outDegree.get(sId) || 0;
+    if (indeg === 0 && outdeg > 0) fuentes.push(n.id);
+    else if (outdeg === 0 && indeg > 0) sumideros.push(n.id);
+    else if (indeg === 0 && outdeg === 0) aislados.push(n.id);
+    if (indeg > 0 && outdeg === 0 && String(nodoSumidero) !== sId && nodoSumidero !== 'T') {
+      callejones.push(n.id);
+    }
+  });
+
+  fuentesRealesDetectadas = fuentes;
+  sumiderosRealesDetectados = sumideros;
+  return { inDegree, outDegree, fuentes, sumideros, aislados, callejones };
+}
+
+// Inyecta fuente ficticia S y sumidero ficticio T con capacidad infinita cuando existen múltiples extremos.
+function aplicarReduccionCanonica(notificar = false) {
+  aristas = aristas.filter(a => !a.isFictitious);
+  posicionesNodos = posicionesNodos.filter(n => !n.isFictitious);
+
+  const analisis = analizarGradosRedBase();
+  const fuentes = analisis.fuentes;
+  const sumideros = analisis.sumideros;
+
+  let superfuenteCreada = false;
+  let supersumideroCreado = false;
+
+  if (fuentes.length >= 2) {
+    superfuenteCreada = true;
+    const minX = Math.min(...posicionesNodos.map(n => n.x));
+    const posX = Math.max(40, minX - 80);
+    const avgY = fuentes.map(id => { const n = obtenerNodo(id); return n ? n.y : 300; }).reduce((a, b) => a + b, 0) / fuentes.length;
+    posicionesNodos.push({ id: 'S', label: 'S', x: posX, y: Math.round(avgY), layer: -1, isFictitious: true, fictitiousType: 'fuente' });
+    fuentes.forEach(fId => {
+      aristas.push({ origen: 'S', destino: fId, peso: Infinity, flujo: 0, isFictitious: true });
+    });
+    nodoFuente = 'S';
+  } else if (fuentes.length === 1) {
+    nodoFuente = fuentes[0];
+  } else if (nodoFuente === null || nodoFuente === 'S') {
+    nodoFuente = posicionesNodos[0] ? posicionesNodos[0].id : 1;
+  }
+
+  if (sumideros.length >= 2) {
+    supersumideroCreado = true;
+    const maxX = Math.max(...posicionesNodos.filter(n => !n.isFictitious).map(n => n.x));
+    const posX = Math.min(560, maxX + 80);
+    const avgY = sumideros.map(id => { const n = obtenerNodo(id); return n ? n.y : 300; }).reduce((a, b) => a + b, 0) / sumideros.length;
+    posicionesNodos.push({ id: 'T', label: 'T', x: posX, y: Math.round(avgY), layer: 999, isFictitious: true, fictitiousType: 'sumidero' });
+    sumideros.forEach(sId => {
+      aristas.push({ origen: sId, destino: 'T', peso: Infinity, flujo: 0, isFictitious: true });
+    });
+    nodoSumidero = 'T';
+  } else if (sumideros.length === 1) {
+    nodoSumidero = sumideros[0];
+  } else {
+    const nodosReales = posicionesNodos.filter(n => !n.isFictitious);
+    if (nodoSumidero === null || nodoSumidero === 'T') {
+      nodoSumidero = nodosReales.length > 0 ? nodosReales[nodosReales.length - 1].id : numVerticesBase;
+    }
+  }
+
+  inputFuente.value = String(nodoFuente !== null ? nodoFuente : '');
+  inputSumidero.value = String(nodoSumidero !== null ? nodoSumidero : '');
+  dibujarRed();
+  validarRed();
+
+  if (notificar) {
+    if (superfuenteCreada && supersumideroCreado) {
+      mostrarToast('Fuente Ficticia (S) y Sumidero Ficticio (T) conectados con capacidad ∞', 'exito');
+    } else if (superfuenteCreada) {
+      mostrarToast(`Fuente Ficticia (S) conectada con capacidad ∞ a las fuentes [${fuentes.join(', ')}]`, 'exito');
+    } else if (supersumideroCreado) {
+      mostrarToast(`Sumidero Ficticio (T) conectado con capacidad ∞ desde los sumideros [${sumideros.join(', ')}]`, 'exito');
+    } else {
+      mostrarToast('Red con extremos únicos. No requiere nodos ficticios.', 'info');
+    }
+  }
+}
+
+// Evalúa si la red es válida para Ford-Fulkerson o reporta puntualmente las anomalías encontradas.
+function validarRed() {
+  const errores = [];
+  const nodosReales = posicionesNodos.filter(n => !n.isFictitious);
+  const analisis = analizarGradosRedBase();
+
+  const fVal = String(inputFuente.value || '').trim();
+  const sVal = String(inputSumidero.value || '').trim();
+  const fNodo = fVal !== '' ? obtenerNodo(fVal) : null;
+  const sNodo = sVal !== '' ? obtenerNodo(sVal) : null;
+  nodoFuente = fNodo ? fNodo.id : null;
+  nodoSumidero = sNodo ? sNodo.id : null;
+
+  const aristasInvalidas = aristas.filter(a => a.peso !== Infinity && (isNaN(Number(a.peso)) || Number(a.peso) <= 0));
+  if (aristasInvalidas.length > 0) {
+    errores.push(`Capacidades inválidas: se detectaron ${aristasInvalidas.length} arista(s) con peso menor o igual a 0.`);
+  }
+
+  analisis.aislados.forEach(id => {
+    errores.push(`Nodo [${id}] aislado: no posee aristas incidentes ni salientes.`);
+  });
+
+  const tieneSFicticio = posicionesNodos.some(n => n.id === 'S');
+  const tieneTFicticio = posicionesNodos.some(n => n.id === 'T');
+
+  if (!tieneSFicticio && analisis.fuentes.length >= 2) {
+    errores.push(`Existen múltiples fuentes independientes sin conectar entre sí: [${analisis.fuentes.join(', ')}]. Presiona "Unir Fuentes (S / T)" para crear una Fuente Ficticia (S).`);
+  }
+
+  if (!tieneTFicticio && analisis.sumideros.length >= 2) {
+    errores.push(`Existen múltiples sumideros independientes sin conectar entre sí: [${analisis.sumideros.join(', ')}]. Presiona "Unir Fuentes (S / T)" para crear un Sumidero Ficticio (T).`);
+  }
+
+  if (fVal === '' || nodoFuente === null) {
+    errores.push('La Fuente no ha sido especificada en el formulario.');
+  }
+  if (sVal === '' || nodoSumidero === null) {
+    errores.push('El Sumidero no ha sido especificado en el formulario.');
+  }
+
+  if (nodoFuente !== null && nodoSumidero !== null) {
+    if (String(nodoFuente) === String(nodoSumidero)) {
+      errores.push('La fuente y el sumidero no pueden ser el mismo nodo.');
+    } else {
+      const caminoBFS = buscarCaminoAumentanteBFS();
+      if (!caminoBFS) {
+        errores.push('No existe trayectoria entre la fuente y el sumidero.');
+      }
+
+      if (!tieneSFicticio) {
+        const visitadosDesdeFuente = new Set([String(nodoFuente)]);
+        const qF = [nodoFuente];
+        while (qF.length > 0) {
+          const u = qF.shift();
+          aristas.filter(a => String(a.origen) === String(u)).forEach(a => {
+            const dest = String(a.destino);
+            if (!visitadosDesdeFuente.has(dest)) {
+              visitadosDesdeFuente.add(dest);
+              qF.push(a.destino);
+            }
+          });
+        }
+        const inalcanzables = nodosReales.filter(n => String(n.id) !== String(nodoFuente) && !visitadosDesdeFuente.has(String(n.id))).map(n => n.id);
+        if (inalcanzables.length > 0) {
+          errores.push(`Nodos sin conexión desde la fuente: [${inalcanzables.join(', ')}] no pueden ser alcanzados desde el nodo ${nodoFuente}. No hay caminos que puedan ir de unos nodos a otros.`);
+        }
+      }
+
+      if (!tieneTFicticio) {
+        const visitadosHaciaSumidero = new Set([String(nodoSumidero)]);
+        const qS = [nodoSumidero];
+        while (qS.length > 0) {
+          const u = qS.shift();
+          aristas.filter(a => String(a.destino) === String(u)).forEach(a => {
+            const orig = String(a.origen);
+            if (!visitadosHaciaSumidero.has(orig)) {
+              visitadosHaciaSumidero.add(orig);
+              qS.push(a.origen);
+            }
+          });
+        }
+        const sinSalida = nodosReales.filter(n => String(n.id) !== String(nodoSumidero) && !visitadosHaciaSumidero.has(String(n.id))).map(n => n.id);
+        if (sinSalida.length > 0) {
+          errores.push(`Callejones sin salida: [${sinSalida.join(', ')}] no tienen camino hacia el sumidero ${nodoSumidero}.`);
+        }
+      }
+    }
+  }
+
+  const esValida = errores.length === 0;
+  badgeEstadoRed.className = `badge-estado ${esValida ? 'badge-verde' : 'badge-rojo'}`;
+  badgeEstadoRed.textContent = esValida ? 'Válida' : 'Inválida';
+
+  const tieneFicticios = posicionesNodos.some(n => n.isFictitious);
+  diagnosticoMensaje.textContent = esValida
+    ? (tieneFicticios ? 'Red válida. Los nodos ficticios permiten calcular el flujo máximo.' : 'Red válida. Fuente/Sumidero Ficticios configurados con capacidad ∞.')
+    : 'Red inválida. La estructura actual no permite ejecutar el algoritmo de Ford-Fulkerson.';
+
+  listaAlertasRed.innerHTML = errores.map(e => `<li class="diagnostico-error-item">✕ ${e}</li>`).join('');
+  return { esValida, errores };
+}
+
+// Distribuye los nodos ordenadamente de izquierda a derecha según sus niveles topológicos.
+function aplicarLayoutHorizontal(capasAsignadas = null) {
+  const nodosReales = posicionesNodos.filter(node => !node.isFictitious);
+  let capas = capasAsignadas;
+
+  if (!capas) {
+    const grados = analizarGradosRedBase();
+    const fuentes = grados.fuentes.length > 0 ? grados.fuentes : [nodosReales[0].id];
+    capas = {};
+    nodosReales.forEach(n => capas[n.id] = 0);
+    const queue = [...fuentes];
+    const visitados = new Set(fuentes);
+
+    while (queue.length > 0) {
+      const u = queue.shift();
+      aristas.filter(a => !a.isFictitious && String(a.origen) === String(u)).forEach(a => {
+        capas[a.destino] = Math.max(capas[a.destino] || 0, capas[u] + 1);
+        if (!visitados.has(a.destino)) {
+          visitados.add(a.destino);
+          queue.push(a.destino);
+        }
+      });
+    }
+  }
+
+  const numCapas = Math.max(...Object.values(capas)) + 1;
+  const xMin = 130;
+  const xMax = 470;
+  const pasoX = numCapas > 1 ? (xMax - xMin) / (numCapas - 1) : 0;
+  const grupos = Array.from({ length: numCapas }, () => []);
+
+  nodosReales.forEach(nodo => {
+    const l = capas[nodo.id] !== undefined ? capas[nodo.id] : 0;
+    nodo.layer = l;
+    grupos[l].push(nodo);
+  });
+
+  grupos.forEach((grupo, idxCapa) => {
+    const cant = grupo.length;
+    const xCoord = Math.round(xMin + idxCapa * pasoX);
+    if (cant === 1) {
+      grupo[0].x = xCoord;
+      grupo[0].y = 300;
+    } else {
+      const yMin = 120;
+      const yMax = 480;
+      const pasoY = (yMax - yMin) / (cant - 1);
+      grupo.forEach((nodo, idxNodo) => {
+        nodo.x = xCoord;
+        nodo.y = Math.round(yMin + idxNodo * pasoY);
+      });
+    }
+  });
+
+  const sf = posicionesNodos.find(node => node.id === 'S');
+  if (sf) { sf.x = 55; sf.y = 300; }
+  const st = posicionesNodos.find(node => node.id === 'T');
+  if (st) { st.x = 545; st.y = 300; }
+
+  dibujarRed();
+}
+
+// Genera proceduralmente un grafo estructurado en capas garantizando caminos dirigidos válidos.
+function generarAristasAleatorias() {
+  const n = numVerticesBase;
+  const numCapas = n <= 8 ? 4 : 5;
+  const cantFuentes = (n >= 8) ? 2 : (Math.random() < 0.6 ? 2 : 1);
+  const cantSumideros = (n >= 8) ? 2 : (Math.random() < 0.6 ? 2 : 1);
+
+  const capasNodos = Array.from({ length: numCapas }, () => []);
+  const nodoACapa = {};
+  let indexNodo = 1;
+
+  for (let i = 0; i < cantFuentes && indexNodo <= n; i++) {
+    capasNodos[0].push(indexNodo);
+    nodoACapa[indexNodo] = 0;
+    indexNodo++;
+  }
+
+  const capasIntermedias = numCapas - 2;
+  const nodosRestantes = n - cantFuentes - cantSumideros;
+  const porCapa = Math.floor(nodosRestantes / capasIntermedias);
+  let sobrantes = nodosRestantes % capasIntermedias;
+
+  for (let c = 1; c <= capasIntermedias; c++) {
+    const cant = porCapa + (sobrantes > 0 ? 1 : 0);
+    if (sobrantes > 0) sobrantes--;
+    for (let i = 0; i < cant && indexNodo <= n - cantSumideros; i++) {
+      capasNodos[c].push(indexNodo);
+      nodoACapa[indexNodo] = c;
+      indexNodo++;
+    }
+  }
+
+  while (indexNodo <= n) {
+    capasNodos[numCapas - 1].push(indexNodo);
+    nodoACapa[indexNodo] = numCapas - 1;
+    indexNodo++;
+  }
+
+  aristas = [];
+  const aristasSet = new Set();
+  function agregarAristaValida(u, v) {
+    if (u === v) return;
+    const key = `${u}->${v}`;
+    if (!aristasSet.has(key)) {
+      aristasSet.add(key);
+      const peso = Math.floor(Math.random() * 20) + 5;
+      aristas.push({ origen: u, destino: v, peso, flujo: 0, isFictitious: false });
+    }
+  }
+
+  for (let c = 1; c < numCapas; c++) {
+    capasNodos[c].forEach(v => {
+      const u = capasNodos[c - 1][Math.floor(Math.random() * capasNodos[c - 1].length)];
+      agregarAristaValida(u, v);
+    });
+  }
+
+  for (let c = 0; c < numCapas - 1; c++) {
+    capasNodos[c].forEach(u => {
+      if (!aristas.some(a => a.origen === u)) {
+        const v = capasNodos[c + 1][Math.floor(Math.random() * capasNodos[c + 1].length)];
+        agregarAristaValida(u, v);
+      }
+    });
+  }
+
+  for (let c = 0; c < numCapas - 1; c++) {
+    capasNodos[c].forEach(u => {
+      capasNodos[c + 1].forEach(v => {
+        if (Math.random() < 0.35) agregarAristaValida(u, v);
+      });
+      if (c + 2 < numCapas && !(c === 0 && c + 2 === numCapas - 1)) {
+        const v = capasNodos[c + 2][Math.floor(Math.random() * capasNodos[c + 2].length)];
+        if (Math.random() < 0.3) agregarAristaValida(u, v);
+      }
+    });
+  }
+
+  aplicarLayoutHorizontal(nodoACapa);
+  aplicarReduccionCanonica();
+
+  flujoTotal = 0;
+  historialRecorridos = [];
+  caminoSeleccionado = [];
+  algoritmoTerminado = false;
+  if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
+  if (valFlujoTotal) valFlujoTotal.textContent = '0';
+  if (seccionFord) seccionFord.style.display = 'none';
+
+  actualizarHistorialInteractivo();
+  validarRed();
+}
+
+// Inicializa los nodos de la red según la cantidad especificada en configuración.
 function generarRed() {
   const valor = inputVertices.value.trim();
   const n = Number(valor);
 
   if (valor === '' || isNaN(n) || !Number.isInteger(n) || n < 7 || n > 16) {
-    mostrarAdvertencia('Estos datos no se permiten. El número de vértices debe ser un número entero entre 7 y 16.');
+    mostrarAdvertencia('El número de vértices debe ser un número entero entre 7 y 16.');
     return;
   }
 
-  inputNodoInicial.max = n;
-  inputNodoFinal.max = n;
-  inputFuente.max = n;
-  inputSumidero.max = n;
+  numVerticesBase = n;
+  inputNodoInicial.value = 1;
+  inputNodoFinal.value = 2;
   nodoFuente = null;
   nodoSumidero = null;
   inputFuente.value = '';
   inputSumidero.value = '';
-  if (Number(inputNodoInicial.value) > n) inputNodoInicial.value = 1;
-  if (Number(inputNodoFinal.value) > n) inputNodoFinal.value = n;
 
   aristas = [];
   posicionesNodos = [];
@@ -104,27 +504,64 @@ function generarRed() {
   flujoTotal = 0;
   historialRecorridos = [];
   algoritmoTerminado = false;
+  if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
   if (seccionFord) seccionFord.style.display = 'none';
 
-  const centroX = 300;
-  const centroY = 300;
-  const radio = 200;
-
-  for (let i = 0; i < n; i++) {
-    const angulo = (2 * Math.PI / n) * i - (Math.PI / 2);
-    const x = centroX + radio * Math.cos(angulo);
-    const y = centroY + radio * Math.sin(angulo);
-    posicionesNodos.push({ x, y });
+  for (let i = 1; i <= n; i++) {
+    posicionesNodos.push({ id: i, label: String(i), x: 0, y: 0, layer: 0, isFictitious: false, fictitiousType: null });
   }
 
-  dibujarRed();
+  const cols = Math.min(4, Math.ceil(n / 3));
+  const capasInit = {};
+  for (let i = 1; i <= n; i++) {
+    capasInit[i] = Math.floor((i - 1) / Math.ceil(n / cols));
+  }
+
+  aplicarLayoutHorizontal(capasInit);
+  validarRed();
 }
 
-// Renderiza los nodos, aristas dirigidas y etiquetas de flujo/capacidad en el elemento SVG.
-function dibujarRed() {
-  const n = posicionesNodos.length;
-  const radioNodo = 20;
+// Inserta manualmente una arista dirigida y con capacidad en el grafo.
+function conectarArista() {
+  const origenVal = inputNodoInicial.value.trim();
+  const destinoVal = inputNodoFinal.value.trim();
+  const pesoVal = inputPeso.value.trim();
 
+  const nodoOrig = obtenerNodo(origenVal);
+  const nodoDest = obtenerNodo(destinoVal);
+
+  if (!nodoOrig || !nodoDest) {
+    mostrarAdvertencia('Verifica los nodos ingresados. Deben existir en la red.');
+    return;
+  }
+  if (String(nodoOrig.id) === String(nodoDest.id)) {
+    mostrarAdvertencia('El nodo inicial y el final no pueden coincidir.');
+    return;
+  }
+
+  const peso = Number(pesoVal);
+  if (pesoVal === '' || isNaN(peso) || !Number.isInteger(peso) || peso < 1 || peso > 9999) {
+    mostrarAdvertencia('La capacidad debe ser un entero entre 1 y 9999.');
+    return;
+  }
+
+  if (aristas.some(a => String(a.origen) === String(nodoOrig.id) && String(a.destino) === String(nodoDest.id))) {
+    mostrarAdvertencia(`Ya existe una arista dirigida de ${nodoOrig.id} a ${nodoDest.id}.`);
+    return;
+  }
+
+  aristas.push({ origen: nodoOrig.id, destino: nodoDest.id, peso, flujo: 0, isFictitious: false });
+  if (seccionFord) seccionFord.style.display = 'none';
+  if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
+
+  dibujarRed();
+  validarRed();
+  mostrarToast(`Arista ${nodoOrig.id} → ${nodoDest.id} agregada`, 'exito');
+}
+
+// Dibuja en el SVG los elementos visuales del grafo incluyendo nodos, aristas y etiquetas.
+function dibujarRed() {
+  const radioNodo = 20;
   grupoAristas.innerHTML = '';
   grupoNodos.innerHTML = '';
 
@@ -132,27 +569,26 @@ function dibujarRed() {
 
   aristas.forEach(arista => {
     arista.flujo = arista.flujo || 0;
-    const p1 = posicionesNodos[arista.origen - 1];
-    const p2 = posicionesNodos[arista.destino - 1];
-
+    const p1 = obtenerNodo(arista.origen);
+    const p2 = obtenerNodo(arista.destino);
     if (!p1 || !p2) return;
 
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     const dist = Math.hypot(dx, dy);
-
     if (dist === 0) return;
 
     const ux = dx / dist;
     const uy = dy / dist;
+    const r1 = p1.isFictitious ? 22 : radioNodo;
+    const r2 = p2.isFictitious ? 22 : radioNodo;
 
-    const x1 = p1.x + radioNodo * ux;
-    const y1 = p1.y + radioNodo * uy;
-    const x2 = p2.x - radioNodo * ux;
-    const y2 = p2.y - radioNodo * uy;
+    const x1 = p1.x + r1 * ux;
+    const y1 = p1.y + r1 * uy;
+    const x2 = p2.x - r2 * ux;
+    const y2 = p2.y - r2 * uy;
 
-    const tieneOpuesta = aristas.some(a => a.origen === arista.destino && a.destino === arista.origen);
-
+    const tieneOpuesta = aristas.some(a => String(a.origen) === String(arista.destino) && String(a.destino) === String(arista.origen));
     const nx = -uy;
     const ny = ux;
 
@@ -172,11 +608,10 @@ function dibujarRed() {
       ly = (y1 + y2) / 2;
     }
 
-    const colorInfo = obtenerColorArista(arista.flujo, arista.peso);
-
+    const colorInfo = obtenerColorArista(arista.flujo, arista.peso, arista.isFictitious);
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', dRuta);
-    path.setAttribute('class', 'arista-linea');
+    path.setAttribute('class', `arista-linea ${arista.isFictitious ? 'arista-ficticia' : ''}`);
     path.setAttribute('stroke', colorInfo.hex);
     path.setAttribute('marker-start', `url(#punto-inicio-${colorInfo.nombre})`);
     path.setAttribute('marker-end', `url(#flecha-${colorInfo.nombre})`);
@@ -186,197 +621,142 @@ function dibujarRed() {
     textoPeso.setAttribute('x', lx);
     textoPeso.setAttribute('y', ly);
     textoPeso.setAttribute('class', 'peso-arista');
-    textoPeso.textContent = `${arista.flujo}/${arista.peso}`;
+    const capTexto = arista.peso === Infinity ? '∞' : arista.peso;
+    textoPeso.textContent = `${arista.flujo}/${capTexto}`;
     textos.push(textoPeso);
   });
 
   textos.forEach(t => grupoAristas.appendChild(t));
 
-  posicionesNodos.forEach((pos, i) => {
-    const idNodo = i + 1;
+  posicionesNodos.forEach(nodoObj => {
+    const idNodo = nodoObj.id;
     const grupo = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     grupo.setAttribute('class', 'nodo');
     grupo.setAttribute('id', `nodo-${idNodo}`);
+    grupo.setAttribute('data-nodo-id', idNodo);
     grupo.style.cursor = 'pointer';
 
-    let color = COLORES[0];
-    if (idNodo === nodoFuente) {
-      color = COLORES[1];
-    } else if (idNodo === nodoSumidero) {
-      color = COLORES[2];
-    }
+    let colorFondo = COLORES[0];
+    const esFicticio = Boolean(nodoObj.isFictitious);
 
-    if (caminoSeleccionado.includes(idNodo)) {
-      color = COLOR_MORADO;
+    if (String(idNodo) === String(nodoFuente)) colorFondo = esFicticio ? COLOR_TEAL_FICTICIO : COLORES[1];
+    else if (String(idNodo) === String(nodoSumidero)) colorFondo = esFicticio ? COLOR_ROSA_FICTICIO : COLORES[2];
+    else if (esFicticio) colorFondo = COLOR_TEAL_FICTICIO;
+
+    if (caminoSeleccionado.some(id => String(id) === String(idNodo))) colorFondo = COLOR_MORADO;
+
+    if (esFicticio) {
+      grupo.classList.add('nodo-ficticio');
+      grupo.classList.add(nodoObj.fictitiousType === 'fuente' || idNodo === 'S' ? 'nodo-ficticio-fuente' : 'nodo-ficticio-sumidero');
     }
 
     const circulo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circulo.setAttribute('cx', pos.x);
-    circulo.setAttribute('cy', pos.y);
-    circulo.setAttribute('r', radioNodo);
-    circulo.setAttribute('fill', color);
+    circulo.setAttribute('cx', nodoObj.x);
+    circulo.setAttribute('cy', nodoObj.y);
+    circulo.setAttribute('r', esFicticio ? 22 : radioNodo);
+    circulo.setAttribute('fill', colorFondo);
 
     const texto = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    texto.setAttribute('x', pos.x);
-    texto.setAttribute('y', pos.y);
-    texto.textContent = idNodo;
+    texto.setAttribute('x', nodoObj.x);
+    texto.setAttribute('y', nodoObj.y);
+    texto.textContent = nodoObj.label || idNodo;
 
     grupo.appendChild(circulo);
     grupo.appendChild(texto);
-
-    grupo.addEventListener('click', () => {
-      manejarClickNodo(idNodo);
-    });
-
+    grupo.addEventListener('click', () => manejarClickNodo(idNodo));
     grupoNodos.appendChild(grupo);
   });
 }
 
-// Valida los datos del formulario manual e inserta una nueva arista dirigida en el grafo.
-function conectarArista() {
-  const n = posicionesNodos.length;
-  const origenVal = inputNodoInicial.value.trim();
-  const destinoVal = inputNodoFinal.value.trim();
-  const pesoVal = inputPeso.value.trim();
-
-  const origen = Number(origenVal);
-  const destino = Number(destinoVal);
-  const peso = Number(pesoVal);
-
-  if (origenVal === '' || isNaN(origen) || !Number.isInteger(origen) || origen < 1 || origen > n) {
-    mostrarAdvertencia(`El nodo inicial debe ser un número entero entre 1 y ${n}.`);
-    return;
-  }
-  if (destinoVal === '' || isNaN(destino) || !Number.isInteger(destino) || destino < 1 || destino > n) {
-    mostrarAdvertencia(`El nodo final debe ser un número entero entre 1 y ${n}.`);
-    return;
-  }
-
-  if (origen === destino) {
-    mostrarAdvertencia('El nodo inicial y el nodo final no pueden ser iguales.');
-    return;
-  }
-
-  if (pesoVal === '' || isNaN(peso) || !Number.isInteger(peso) || peso < 1 || peso > 9999) {
-    mostrarAdvertencia('El peso de la arista debe ser un número entero entre 1 y 9999 (no puede ser 0).');
-    return;
-  }
-
-  const yaExiste = aristas.some(a => a.origen === origen && a.destino === destino);
-  if (yaExiste) {
-    mostrarAdvertencia(`Ya existe una arista del nodo ${origen} al nodo ${destino}.`);
-    return;
-  }
-
-  aristas.push({ origen, destino, peso, flujo: 0 });
-  if (seccionFord) seccionFord.style.display = 'none';
-  dibujarRed();
-}
-
-// Genera un conjunto aleatorio de aristas dirigidas sin ciclos hacia adelante.
-function generarAristasAleatorias() {
-  const n = posicionesNodos.length;
-  aristas = [];
-
-  const mapaAristas = new Set();
-  function agregarArista(u, v) {
-    if (u === v || u < 1 || u > n || v < 1 || v > n) return;
-    const clave = `${u}->${v}`;
-    if (!mapaAristas.has(clave)) {
-      mapaAristas.add(clave);
-      const peso = Math.floor(Math.random() * 20) + 1;
-      aristas.push({ origen: u, destino: v, peso, flujo: 0 });
-    }
-  }
-
-  for (let i = 1; i < n; i++) {
-    agregarArista(i, i + 1);
-    if (i + 2 <= n && Math.random() < 0.5) {
-      agregarArista(i, i + 2);
-    }
-  }
-
-  const aristasExtra = Math.floor(n * 0.8);
-  for (let k = 0; k < aristasExtra; k++) {
-    const u = Math.floor(Math.random() * (n - 1)) + 1;
-    const v = Math.floor(Math.random() * (n - u)) + u + 1;
-    agregarArista(u, v);
-  }
-
-  if (seccionFord) seccionFord.style.display = 'none';
-  dibujarRed();
-}
-
-// Detecta si existen ciclos dirigidos en el grafo mediante búsqueda en profundidad (DFS).
-function tieneCiclos() {
-  const n = posicionesNodos.length;
-  const adj = Array.from({ length: n + 1 }, () => []);
-  aristas.forEach(a => {
-    if (a.origen <= n && a.destino <= n) {
-      adj[a.origen].push(a.destino);
-    }
-  });
-
-  const estado = Array(n + 1).fill(0);
-  function dfs(u) {
-    estado[u] = 1;
-    for (const v of adj[u]) {
-      if (estado[v] === 1) return true;
-      if (estado[v] === 0 && dfs(v)) return true;
-    }
-    estado[u] = 2;
-    return false;
-  }
-
-  for (let i = 1; i <= n; i++) {
-    if (estado[i] === 0) {
-      if (dfs(i)) return true;
-    }
-  }
-  return false;
-}
-
-// Localiza un camino aumentante con capacidad residual disponible entre fuente y sumidero usando BFS.
+// Encuentra un camino aumentante residual entre la fuente y el sumidero usando BFS.
 function buscarCaminoAumentanteBFS() {
-  const n = posicionesNodos.length;
-  const parent = Array(n + 1).fill(null);
+  if (nodoFuente === null || nodoSumidero === null) return null;
+  const parent = new Map();
   const queue = [nodoFuente];
-  const visitado = Array(n + 1).fill(false);
-  visitado[nodoFuente] = true;
+  const visitado = new Set([String(nodoFuente)]);
 
   while (queue.length > 0) {
     const u = queue.shift();
-    if (u === nodoSumidero) break;
+    if (String(u) === String(nodoSumidero)) break;
 
     for (const a of aristas) {
-      if (a.origen === u && !visitado[a.destino] && (a.peso - a.flujo > 0)) {
-        visitado[a.destino] = true;
-        parent[a.destino] = u;
-        queue.push(a.destino);
+      if (String(a.origen) === String(u)) {
+        const destStr = String(a.destino);
+        const residual = Number(a.peso) - Number(a.flujo);
+        if (!visitado.has(destStr) && residual > 0) {
+          visitado.add(destStr);
+          parent.set(destStr, a.origen);
+          queue.push(a.destino);
+        }
       }
     }
   }
 
-  if (!visitado[nodoSumidero]) return null;
+  if (!visitado.has(String(nodoSumidero))) return null;
 
   const camino = [];
   let curr = nodoSumidero;
-  while (curr !== nodoFuente) {
+  while (String(curr) !== String(nodoFuente)) {
     camino.unshift(curr);
-    curr = parent[curr];
+    curr = parent.get(String(curr));
   }
   camino.unshift(nodoFuente);
   return camino;
 }
 
-// Maneja la interacción al hacer clic en un nodo para construir el camino de flujo paso a paso.
+// Configura la fuente y el sumidero elegidos y habilita el entorno de ejecución del algoritmo.
+function aplicarFuenteSumidero() {
+  const fuenteVal = inputFuente.value.trim();
+  const sumideroVal = inputSumidero.value.trim();
+  const nodoOrig = obtenerNodo(fuenteVal);
+  const nodoDest = obtenerNodo(sumideroVal);
+
+  if (!nodoOrig || !nodoDest) {
+    mostrarAdvertencia('La fuente y el sumidero seleccionados deben existir en la red.');
+    return;
+  }
+  if (String(nodoOrig.id) === String(nodoDest.id)) {
+    mostrarAdvertencia('La fuente y el sumidero deben ser nodos diferentes.');
+    return;
+  }
+
+  nodoFuente = nodoOrig.id;
+  nodoSumidero = nodoDest.id;
+
+  aristas.forEach(a => a.flujo = 0);
+  flujoTotal = 0;
+  historialRecorridos = [];
+  caminoSeleccionado = [];
+  algoritmoTerminado = false;
+  if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
+
+  const diag = validarRed();
+  if (!diag.esValida) {
+    mostrarAdvertencia('La red presenta inconsistencias reportadas en el panel de Diagnóstico.');
+    seccionFord.style.display = 'none';
+    dibujarRed();
+    return;
+  }
+
+  seccionFord.style.display = 'flex';
+  instruccionFord.textContent = `Halla un camino de ${nodoFuente} hacia ${nodoSumidero} (haz clic sobre los nodos empezando de la fuente)`;
+  textoCamino.textContent = 'Ninguno';
+  btnVerificarCamino.disabled = true;
+  divPreguntaCapacidad.style.display = 'none';
+  panelFinalFlujo.style.display = 'none';
+  valFlujoTotal.textContent = '0';
+
+  dibujarRed();
+  mostrarToast(`Fuente: ${nodoFuente}, Sumidero: ${nodoSumidero} fijados`, 'exito');
+}
+
+// Gestiona la selección interactiva de nodos al construir manualmente el camino aumentante.
 function manejarClickNodo(idNodo) {
   if (isDragging) return;
-  if (seccionFord.style.display !== 'flex') return;
+  if (!seccionFord || seccionFord.style.display !== 'flex') return;
   if (algoritmoTerminado) return;
   if (divPreguntaCapacidad.style.display === 'flex') return;
-
-  if (caminoSeleccionado[caminoSeleccionado.length - 1] === idNodo) return;
+  if (caminoSeleccionado.length > 0 && String(caminoSeleccionado[caminoSeleccionado.length - 1]) === String(idNodo)) return;
 
   caminoSeleccionado.push(idNodo);
   textoCamino.textContent = caminoSeleccionado.join(' -> ');
@@ -384,7 +764,7 @@ function manejarClickNodo(idNodo) {
   dibujarRed();
 }
 
-// Restablece la selección del camino actual y desactiva el botón de verificación.
+// Reinicia la selección del camino actual en construcción.
 function limpiarSeleccionCamino() {
   caminoSeleccionado = [];
   textoCamino.textContent = 'Ninguno';
@@ -393,7 +773,7 @@ function limpiarSeleccionCamino() {
   dibujarRed();
 }
 
-// Valida que el camino elegido inicie en la fuente, finalice en el sumidero y posea aristas con capacidad disponible.
+// Valida que el camino elegido comience en la fuente, termine en el sumidero y tenga capacidad residual.
 function verificarCamino() {
   if (caminoSeleccionado.length < 2) {
     mostrarAdvertencia('El camino debe tener al menos 2 nodos.');
@@ -401,14 +781,14 @@ function verificarCamino() {
     return;
   }
 
-  if (caminoSeleccionado[0] !== nodoFuente) {
-    mostrarAdvertencia(`El camino no es correcto. Debe iniciar en la fuente (${nodoFuente}).`);
+  if (String(caminoSeleccionado[0]) !== String(nodoFuente)) {
+    mostrarAdvertencia(`El camino debe iniciar en la fuente (${nodoFuente}).`);
     limpiarSeleccionCamino();
     return;
   }
 
-  if (caminoSeleccionado[caminoSeleccionado.length - 1] !== nodoSumidero) {
-    mostrarAdvertencia(`El camino no es correcto. Debe terminar en el sumidero (${nodoSumidero}).`);
+  if (String(caminoSeleccionado[caminoSeleccionado.length - 1]) !== String(nodoSumidero)) {
+    mostrarAdvertencia(`El camino debe terminar en el sumidero (${nodoSumidero}).`);
     limpiarSeleccionCamino();
     return;
   }
@@ -416,16 +796,16 @@ function verificarCamino() {
   for (let i = 0; i < caminoSeleccionado.length - 1; i++) {
     const u = caminoSeleccionado[i];
     const v = caminoSeleccionado[i + 1];
-    const arista = aristas.find(a => a.origen === u && a.destino === v);
+    const arista = aristas.find(a => String(a.origen) === String(u) && String(a.destino) === String(v));
 
     if (!arista) {
-      mostrarAdvertencia(`El camino no es correcto. No existe una arista del nodo ${u} al nodo ${v}.`);
+      mostrarAdvertencia(`No existe arista dirigida entre ${u} y ${v}.`);
       limpiarSeleccionCamino();
       return;
     }
 
     if (arista.peso - arista.flujo <= 0) {
-      mostrarAdvertencia(`El camino no es correcto. La arista del nodo ${u} al nodo ${v} ya no tiene capacidad disponible.`);
+      mostrarAdvertencia(`La arista ${u} → ${v} no posee capacidad residual.`);
       limpiarSeleccionCamino();
       return;
     }
@@ -433,10 +813,12 @@ function verificarCamino() {
 
   divPreguntaCapacidad.style.display = 'flex';
   inputCapacidadCamino.value = '';
-  inputCapacidadCamino.focus();
+  if (inputCapacidadCamino && typeof inputCapacidadCamino.focus === 'function') {
+    inputCapacidadCamino.focus();
+  }
 }
 
-// Valida el cuello de botella ingresado por el usuario, incrementa el flujo del camino y comprueba si se llegó al flujo máximo.
+// Confirma el cuello de botella, aumenta el flujo residual y comprueba la condición de corte mínimo.
 function confirmarCapacidad() {
   const capIngresada = Number(inputCapacidadCamino.value.trim());
 
@@ -444,31 +826,25 @@ function confirmarCapacidad() {
   for (let i = 0; i < caminoSeleccionado.length - 1; i++) {
     const u = caminoSeleccionado[i];
     const v = caminoSeleccionado[i + 1];
-    const arista = aristas.find(a => a.origen === u && a.destino === v);
+    const arista = aristas.find(a => String(a.origen) === String(u) && String(a.destino) === String(v));
     const residual = arista.peso - arista.flujo;
-    if (residual < cuelloBotella) {
-      cuelloBotella = residual;
-    }
+    if (residual < cuelloBotella) cuelloBotella = residual;
   }
 
   if (isNaN(capIngresada) || capIngresada !== cuelloBotella || capIngresada <= 0) {
-    mostrarAdvertencia('La capacidad máxima ingresada no es correcta. Debe ser el cuello de botella (menor capacidad residual) de este camino.');
+    mostrarAdvertencia(`Capacidad incorrecta. Debe ser el cuello de botella (${cuelloBotella}) del camino.`);
     return;
   }
 
   for (let i = 0; i < caminoSeleccionado.length - 1; i++) {
     const u = caminoSeleccionado[i];
     const v = caminoSeleccionado[i + 1];
-    const arista = aristas.find(a => a.origen === u && a.destino === v);
+    const arista = aristas.find(a => String(a.origen) === String(u) && String(a.destino) === String(v));
     arista.flujo += cuelloBotella;
   }
 
   flujoTotal += cuelloBotella;
-  historialRecorridos.push({
-    camino: caminoSeleccionado.join(' -> '),
-    capacidad: cuelloBotella
-  });
-
+  historialRecorridos.push({ camino: caminoSeleccionado.join(' -> '), capacidad: cuelloBotella });
   valFlujoTotal.textContent = flujoTotal;
 
   caminoSeleccionado = [];
@@ -477,183 +853,334 @@ function confirmarCapacidad() {
   divPreguntaCapacidad.style.display = 'none';
 
   dibujarRed();
+  actualizarHistorialInteractivo();
 
   const hayMasCaminos = buscarCaminoAumentanteBFS();
   if (!hayMasCaminos) {
     algoritmoTerminado = true;
     panelFinalFlujo.style.display = 'block';
-    textoResumenFinal.textContent = `Capacidad total del flujo máximo: ${flujoTotal}. Total de recorridos realizados: ${historialRecorridos.length}.`;
+
+    const corte = calcularCorteMinimo();
+    dibujarLineaCorteMinimo(corte);
+
+    let textoCorteHTML = '';
+    if (corte) {
+      textoCorteHTML = `
+        <div class="corte-minimo-detalle">
+          <strong>Teorema de Flujo Máximo / Corte Mínimo:</strong><br>
+          <span>• Conjunto S (alcanzables en Gf): {${corte.conjuntoS.join(', ')}}</span><br>
+          <span>• Conjunto T (no alcanzables): {${corte.conjuntoT.join(', ')}}</span><br>
+          <span>• Aristas del corte c(S, T): ${corte.aristasCorte.map(a => `${a.origen}→${a.destino} (c: ${a.peso === Infinity ? '∞' : a.peso})`).join(', ') || 'Ninguna'}</span><br>
+          <span>• Capacidad del corte: c(S, T) = <strong>${corte.capacidadCorte}</strong></span><br>
+          <span>• Verificación formal: <strong>|f| = ${flujoTotal} = c(S, T)</strong> (Demostración de flujo óptimo).</span>
+        </div>
+      `;
+    }
+
+    textoResumenFinal.innerHTML = `
+      Capacidad total del flujo máximo: <strong>${flujoTotal}</strong>.<br>
+      Total de recorridos realizados: ${historialRecorridos.length}.
+      ${textoCorteHTML}
+    `;
     listaCaminosRecorridos.innerHTML = historialRecorridos.map((r, idx) => `<div><strong>${idx + 1}.</strong> ${r.camino} (+${r.capacidad})</div>`).join('');
     instruccionFord.textContent = '¡Flujo Máximo Alcanzado! No existen más caminos aumentantes disponibles.';
+    mostrarToast(`¡Flujo Máximo alcanzado: ${flujoTotal}!`, 'exito', 5000);
   } else {
-    instruccionFord.textContent = `Halla un camino de ${nodoFuente} hacia ${nodoSumidero} (presiona click sobre los nodos empezando desde la fuente)`;
+    instruccionFord.textContent = `Halla un camino de ${nodoFuente} hacia ${nodoSumidero} (haz clic sobre los nodos)`;
   }
 }
 
-// Configura los nodos fuente y sumidero tras validar que no existan ciclos y que haya al menos un camino aumentante.
-function aplicarFuenteSumidero() {
-  const n = posicionesNodos.length;
-  const fuenteVal = inputFuente.value.trim();
-  const sumideroVal = inputSumidero.value.trim();
+// Determina formalmente el corte mínimo (S, T) sobre la red residual final mediante búsqueda BFS.
+function calcularCorteMinimo() {
+  if (nodoFuente === null || nodoSumidero === null) return null;
+  const visitados = new Set([String(nodoFuente)]);
+  const queue = [nodoFuente];
 
-  const fuente = Number(fuenteVal);
-  const sumidero = Number(sumideroVal);
-
-  if (fuenteVal === '' || isNaN(fuente) || !Number.isInteger(fuente) || fuente < 1 || fuente > n) {
-    mostrarAdvertencia(`El nodo fuente debe ser un número entero entre 1 y ${n}.`);
-    return;
+  while (queue.length > 0) {
+    const u = queue.shift();
+    for (const a of aristas) {
+      if (String(a.origen) === String(u)) {
+        const destStr = String(a.destino);
+        const residual = (a.peso === Infinity ? Infinity : Number(a.peso)) - Number(a.flujo);
+        if (residual > 0 && !visitados.has(destStr)) {
+          visitados.add(destStr);
+          queue.push(a.destino);
+        }
+      }
+      if (String(a.destino) === String(u)) {
+        const origStr = String(a.origen);
+        if (Number(a.flujo) > 0 && !visitados.has(origStr)) {
+          visitados.add(origStr);
+          queue.push(a.origen);
+        }
+      }
+    }
   }
-  if (sumideroVal === '' || isNaN(sumidero) || !Number.isInteger(sumidero) || sumidero < 1 || sumidero > n) {
-    mostrarAdvertencia(`El nodo sumidero debe ser un número entero entre 1 y ${n}.`);
-    return;
+
+  const conjuntoS = [];
+  const conjuntoT = [];
+  posicionesNodos.forEach(n => {
+    if (visitados.has(String(n.id))) conjuntoS.push(n.id);
+    else conjuntoT.push(n.id);
+  });
+
+  const aristasCorte = aristas.filter(a => visitados.has(String(a.origen)) && !visitados.has(String(a.destino)));
+  const capacidadCorte = aristasCorte.reduce((sum, a) => sum + (a.peso === Infinity ? a.flujo : Number(a.peso)), 0);
+
+  return { conjuntoS, conjuntoT, aristasCorte, capacidadCorte, visitados };
+}
+
+// Dibuja en el lienzo SVG la línea divisoria discontinua que separa visualmente el corte (S, T).
+function dibujarLineaCorteMinimo(corte) {
+  if (!grupoCorteMinimo) return;
+  grupoCorteMinimo.innerHTML = '';
+  if (!corte || corte.conjuntoS.length === 0 || corte.conjuntoT.length === 0) return;
+
+  const nodosS = posicionesNodos.filter(n => corte.visitados.has(String(n.id)));
+  const nodosT = posicionesNodos.filter(n => !corte.visitados.has(String(n.id)));
+
+  if (nodosS.length === 0 || nodosT.length === 0) return;
+
+  const maxXS = Math.max(...nodosS.map(n => n.x));
+  const minXT = Math.min(...nodosT.map(n => n.x));
+  const corteX = maxXS < minXT ? (maxXS + minXT) / 2 : Math.max(30, Math.min(570, (maxXS + minXT) / 2));
+
+  const linea = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  linea.setAttribute('x1', corteX);
+  linea.setAttribute('y1', 25);
+  linea.setAttribute('x2', corteX);
+  linea.setAttribute('y2', 575);
+  linea.setAttribute('class', 'linea-corte-minimo');
+  grupoCorteMinimo.appendChild(linea);
+
+  const etiqueta = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  etiqueta.setAttribute('x', corteX);
+  etiqueta.setAttribute('y', 20);
+  etiqueta.setAttribute('class', 'etiqueta-corte-minimo');
+  etiqueta.textContent = 'Corte Mínimo (S, T)';
+  grupoCorteMinimo.appendChild(etiqueta);
+}
+
+// Transforma las coordenadas de la pantalla a coordenadas del sistema SVG.
+function getSVGPoint(evt) {
+  const pt = svgRed.createSVGPoint();
+  const ctm = svgRed.getScreenCTM().inverse();
+  pt.x = evt.clientX;
+  pt.y = evt.clientY;
+  return pt.matrixTransform(ctm);
+}
+
+svgRed.addEventListener('mousedown', (e) => {
+  const nodoEl = e.target.closest('.nodo');
+  if (!nodoEl) return;
+  nodoDragId = nodoEl.getAttribute('data-nodo-id') || nodoEl.id.replace('nodo-', '');
+  isDragging = false;
+  dragStartPos = { x: e.clientX, y: e.clientY };
+  nodoEl.classList.add('nodo-dragging');
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', (e) => {
+  if (nodoDragId === null) return;
+  if (!isDragging && dragStartPos) {
+    if (Math.abs(e.clientX - dragStartPos.x) > 4 || Math.abs(e.clientY - dragStartPos.y) > 4) isDragging = true;
   }
+  if (!isDragging) return;
 
-  if (fuente === sumidero) {
-    mostrarAdvertencia('El nodo fuente y el sumidero no pueden ser el mismo.');
-    return;
-  }
-
-  if (tieneCiclos()) {
-    mostrarAdvertencia('El grafo contiene ciclos. Por favor, corrige la estructura de las aristas antes de continuar.');
-    return;
-  }
-
-  nodoFuente = fuente;
-  nodoSumidero = sumidero;
-
-  aristas.forEach(a => a.flujo = 0);
-  flujoTotal = 0;
-  historialRecorridos = [];
-  caminoSeleccionado = [];
-  algoritmoTerminado = false;
-
-  const existeCamino = buscarCaminoAumentanteBFS();
-  if (!existeCamino) {
-    mostrarAdvertencia('No existe ningún camino posible entre la fuente y el sumidero seleccionados.');
-    seccionFord.style.display = 'none';
+  const svgPoint = getSVGPoint(e);
+  const nodoObj = obtenerNodo(nodoDragId);
+  if (nodoObj) {
+    nodoObj.x = Math.max(25, Math.min(575, svgPoint.x));
+    nodoObj.y = Math.max(25, Math.min(575, svgPoint.y));
     dibujarRed();
-    return;
+    const el = document.getElementById(`nodo-${nodoDragId}`);
+    if (el) el.classList.add('nodo-dragging');
   }
+  ocultarTooltipNodo();
+});
 
-  seccionFord.style.display = 'flex';
-  instruccionFord.textContent = `Halla un camino de ${nodoFuente} hacia ${nodoSumidero} (presiona click sobre los nodos)`;
-  textoCamino.textContent = 'Ninguno';
-  btnVerificarCamino.disabled = true;
-  divPreguntaCapacidad.style.display = 'none';
-  panelFinalFlujo.style.display = 'none';
-  valFlujoTotal.textContent = '0';
+document.addEventListener('mouseup', () => {
+  if (nodoDragId !== null) {
+    const el = document.getElementById(`nodo-${nodoDragId}`);
+    if (el) el.classList.remove('nodo-dragging');
+    nodoDragId = null;
+    isDragging = false;
+    dragStartPos = null;
+  }
+});
 
-  dibujarRed();
+// Presenta el tooltip flotante con la información topológica y flujo neto del nodo.
+function mostrarTooltipNodo(idNodo, eventoMouse) {
+  const nodoObj = obtenerNodo(idNodo);
+  if (!nodoObj) return;
+
+  const salientes = aristas.filter(a => String(a.origen) === String(idNodo));
+  const entrantes = aristas.filter(a => String(a.destino) === String(idNodo));
+  const flujoSaliente = salientes.reduce((s, a) => s + (a.flujo || 0), 0);
+  const flujoEntrante = entrantes.reduce((s, a) => s + (a.flujo || 0), 0);
+
+  let tipo = 'Normal';
+  if (nodoObj.isFictitious) tipo = nodoObj.id === 'S' ? 'Fuente Ficticia (S)' : 'Sumidero Ficticio (T)';
+  else if (String(idNodo) === String(nodoFuente)) tipo = 'Fuente';
+  else if (String(idNodo) === String(nodoSumidero)) tipo = 'Sumidero';
+
+  tooltipNodoId.textContent = idNodo;
+  tooltipNodoTipo.textContent = tipo;
+  tooltipNodoSalientes.textContent = `${salientes.length} (flujo: ${flujoSaliente})`;
+  tooltipNodoEntrantes.textContent = `${entrantes.length} (flujo: ${flujoEntrante})`;
+  tooltipNodoFlujo.textContent = flujoSaliente - flujoEntrante;
+  nodoTooltip.style.display = 'block';
+
+  const tooltipRect = nodoTooltip.getBoundingClientRect();
+  let left = eventoMouse.clientX + 16;
+  let top = eventoMouse.clientY - 10;
+  if (left + tooltipRect.width > window.innerWidth) left = eventoMouse.clientX - tooltipRect.width - 16;
+  if (top + tooltipRect.height > window.innerHeight) top = window.innerHeight - tooltipRect.height - 10;
+
+  nodoTooltip.style.left = `${left}px`;
+  nodoTooltip.style.top = `${top}px`;
 }
 
-btnConectar.addEventListener('click', conectarArista);
-btnAleatorio.addEventListener('click', generarAristasAleatorias);
-btnAceptarFuenteSumidero.addEventListener('click', aplicarFuenteSumidero);
-btnVerificarCamino.addEventListener('click', verificarCamino);
-btnLimpiarCamino.addEventListener('click', limpiarSeleccionCamino);
-btnConfirmarCapacidad.addEventListener('click', confirmarCapacidad);
-btnAplicar.addEventListener('click', generarRed);
+// Oculta el tooltip informativo del nodo.
+function ocultarTooltipNodo() {
+  nodoTooltip.style.display = 'none';
+}
 
-// SISTEMA DE TOAST NOTIFICATIONS
-const toastContainer = document.getElementById('toast-container');
+// Renderiza en la interfaz la lista de caminos aumentantes recorridos con soporte de replay.
+function actualizarHistorialInteractivo() {
+  if (historialRecorridos.length === 0) {
+    seccionHistorial.style.display = 'none';
+    return;
+  }
+  seccionHistorial.style.display = 'flex';
+  historialInteractivo.innerHTML = '';
 
-function mostrarToast(mensaje, tipo = 'info', duracion = 3500) {
-  const iconos = {
-    exito: '✓',
-    info: 'ℹ',
-    aviso: '⚠'
-  };
+  historialRecorridos.forEach((rec, idx) => {
+    const item = document.createElement('div');
+    item.className = 'historial-item';
+    item.innerHTML = `
+      <span class="historial-num">${idx + 1}</span>
+      <div class="historial-detalle">
+        <span class="historial-camino">${rec.camino}</span>
+        <span class="historial-capacidad">+${rec.capacidad} unidades</span>
+      </div>
+      <button class="btn historial-replay-btn" title="Reproducir este camino">▶</button>
+    `;
 
+    item.addEventListener('mouseenter', () => {
+      rec.camino.split(' -> ').forEach(id => {
+        const el = document.getElementById(`nodo-${id}`);
+        if (el) {
+          const c = el.querySelector('circle');
+          if (c) c.setAttribute('fill', COLOR_MORADO);
+        }
+      });
+      item.classList.add('historial-active');
+    });
+
+    item.addEventListener('mouseleave', () => {
+      dibujarRed();
+      item.classList.remove('historial-active');
+    });
+
+    item.querySelector('.historial-replay-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      replayPath(rec.camino.split(' -> '));
+    });
+
+    historialInteractivo.appendChild(item);
+  });
+
+  btnReplayTodo.disabled = historialRecorridos.length === 0;
+}
+
+// Pausa la ejecución asíncrona durante un número determinado de milisegundos.
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Reproduce secuencialmente la animación de un camino aumentante sobre el grafo.
+async function replayPath(nodos) {
+  caminoSeleccionado = [];
+  dibujarRed();
+  for (let i = 0; i < nodos.length; i++) {
+    caminoSeleccionado.push(nodos[i]);
+    dibujarRed();
+    await sleep(350);
+  }
+  setTimeout(() => {
+    caminoSeleccionado = [];
+    dibujarRed();
+  }, 1000);
+}
+
+// Reproduce de forma automática todos los caminos aumentantes almacenados en el historial.
+async function replayTodo() {
+  btnReplayTodo.disabled = true;
+  for (let i = 0; i < historialRecorridos.length; i++) {
+    await replayPath(historialRecorridos[i].camino.split(' -> '));
+    await sleep(400);
+  }
+  btnReplayTodo.disabled = false;
+}
+
+btnReplayTodo.addEventListener('click', replayTodo);
+
+// Muestra una notificación emergente temporal tipo toast en la interfaz.
+function mostrarToast(mensaje, tipo = 'info', duracion = 3000) {
+  const iconos = { exito: '✓', info: 'ℹ', aviso: '⚠' };
   const toast = document.createElement('div');
   toast.className = `toast toast-${tipo}`;
-  toast.innerHTML = `
-    <span class="toast-icono">${iconos[tipo] || 'ℹ'}</span>
-    <span>${mensaje}</span>
-    <div class="toast-progress"></div>
-  `;
+  toast.innerHTML = `<span class="toast-icono">${iconos[tipo] || 'ℹ'}</span><span>${mensaje}</span><div class="toast-progress"></div>`;
   toast.style.position = 'relative';
 
   toast.addEventListener('click', () => {
     toast.classList.add('toast-exit');
-    setTimeout(() => toast.remove(), 350);
+    setTimeout(() => toast.remove(), 300);
   });
 
   toastContainer.appendChild(toast);
-
   setTimeout(() => {
     if (toast.parentNode) {
       toast.classList.add('toast-exit');
-      setTimeout(() => toast.remove(), 350);
+      setTimeout(() => toast.remove(), 300);
     }
   }, duracion);
 }
 
-// SISTEMA DE TUTORIAL INTERACTIVO
-const tutorialOverlay = document.getElementById('tutorial-overlay');
-const tutorialTitulo = document.getElementById('tutorial-titulo');
-const tutorialContenido = document.getElementById('tutorial-contenido');
-const tutorialPasoNum = document.getElementById('tutorial-paso-num');
-const tutorialProgressBar = document.getElementById('tutorial-progress-bar');
-const btnTutorialSiguiente = document.getElementById('btn-tutorial-siguiente');
-const btnTutorialAnterior = document.getElementById('btn-tutorial-anterior');
-const btnTutorialOmitir = document.getElementById('btn-tutorial-omitir');
-const btnTutorial = document.getElementById('btn-tutorial');
-
 const pasosTutorial = [
-  {
-    titulo: '¡Bienvenido! 👋',
-    contenido: 'Esta herramienta te permite construir un grafo dirigido y resolver el problema de Flujo Máximo paso a paso usando el algoritmo de Ford-Fulkerson. ¡Sigue este tour para aprender a usarla!'
-  },
-  {
-    titulo: 'Paso 1: Configurar Vértices',
-    contenido: 'Comienza eligiendo la cantidad de vértices (nodos) para tu grafo. Puedes usar entre 7 y 16 nodos. Haz clic en "Aplicar" para generar la disposición circular de los nodos.'
-  },
-  {
-    titulo: 'Paso 2: Añadir Aristas',
-    contenido: 'Usa el modo "Manual" para agregar aristas una por una (nodo inicial → nodo final con capacidad), o usa "Aleatorio" para generar un grafo automáticamente. Las aristas tienen dirección y capacidad máxima.'
-  },
-  {
-    titulo: 'Paso 3: Fuente y Sumidero',
-    contenido: 'Define qué nodo será la Fuente (origen del flujo, verde) y cuál el Sumidero (destino del flujo, rojo). El algoritmo encontrará el flujo máximo posible entre ambos.'
-  },
-  {
-    titulo: 'Paso 4: Encontrar Caminos',
-    contenido: 'Haz clic en los nodos del grafo para trazar un camino desde la Fuente hasta el Sumidero. Luego verifica el camino, ingresa la capacidad (cuello de botella) y repite hasta que no queden caminos aumentantes. ¡Los nodos son arrastrables!'
-  }
+  { titulo: 'Simulador de Flujo Máximo', contenido: 'Modela redes dirigidas y resuelve el problema de Flujo Máximo con Ford-Fulkerson y el Teorema del Corte Mínimo.' },
+  { titulo: 'Vértices y Layout Horizontal', contenido: 'Configura la cantidad de nodos y presiona "Aleatorio" para generar una red por niveles de izquierda a derecha sin atajos directos.' },
+  { titulo: 'Fuentes y Sumideros Ficticios', contenido: 'Si hay múltiples fuentes o sumideros, el sistema crea automáticamente extremos ficticios (S y T) con capacidad infinita (∞).' },
+  { titulo: 'Diagnóstico en Tiempo Real', contenido: 'El contenedor de Diagnóstico valida de inmediato si la red es Válida o lista puntualmente errores como callejones o falta de caminos.' },
+  { titulo: 'Corte Mínimo (S, T)', contenido: 'Al agotar los caminos aumentantes, el simulador traza la línea divisoria del Corte Mínimo y verifica formalmente que |f| = c(S, T).' }
 ];
 
 let pasoActualTutorial = 0;
 
+// Actualiza los elementos textuales y la barra de progreso del tutorial.
 function actualizarTutorial() {
   const paso = pasosTutorial[pasoActualTutorial];
   tutorialTitulo.textContent = paso.titulo;
   tutorialContenido.textContent = paso.contenido;
   tutorialPasoNum.textContent = `${pasoActualTutorial + 1}/${pasosTutorial.length}`;
   tutorialProgressBar.style.width = `${((pasoActualTutorial + 1) / pasosTutorial.length) * 100}%`;
-
   btnTutorialAnterior.disabled = pasoActualTutorial === 0;
   btnTutorialSiguiente.textContent = pasoActualTutorial === pasosTutorial.length - 1 ? '¡Empezar! 🚀' : 'Siguiente →';
 }
 
-function abrirTutorial() {
+btnTutorial.addEventListener('click', () => {
   pasoActualTutorial = 0;
   actualizarTutorial();
   tutorialOverlay.style.display = 'flex';
-}
-
-function cerrarTutorial() {
-  tutorialOverlay.style.display = 'none';
-  mostrarToast('¡Tutorial completado! Ya puedes empezar.', 'exito');
-}
-
-btnTutorial.addEventListener('click', abrirTutorial);
+});
 
 btnTutorialSiguiente.addEventListener('click', () => {
   if (pasoActualTutorial < pasosTutorial.length - 1) {
     pasoActualTutorial++;
     actualizarTutorial();
   } else {
-    cerrarTutorial();
+    tutorialOverlay.style.display = 'none';
   }
 });
 
@@ -668,329 +1195,68 @@ btnTutorialOmitir.addEventListener('click', () => {
   tutorialOverlay.style.display = 'none';
 });
 
-// TOOLTIPS EN NODOS
-const nodoTooltip = document.getElementById('nodo-tooltip');
-const tooltipNodoId = document.getElementById('tooltip-nodo-id');
-const tooltipNodoTipo = document.getElementById('tooltip-nodo-tipo');
-const tooltipNodoSalientes = document.getElementById('tooltip-nodo-salientes');
-const tooltipNodoEntrantes = document.getElementById('tooltip-nodo-entrantes');
-const tooltipNodoFlujo = document.getElementById('tooltip-nodo-flujo');
-
-function mostrarTooltipNodo(idNodo, eventoMouse) {
-  const salientes = aristas.filter(a => a.origen === idNodo);
-  const entrantes = aristas.filter(a => a.destino === idNodo);
-  const flujoSaliente = salientes.reduce((s, a) => s + a.flujo, 0);
-  const flujoEntrante = entrantes.reduce((s, a) => s + a.flujo, 0);
-
-  let tipo = 'Normal';
-  if (idNodo === nodoFuente) tipo = '🟢 Fuente';
-  else if (idNodo === nodoSumidero) tipo = '🔴 Sumidero';
-
-  tooltipNodoId.textContent = idNodo;
-  tooltipNodoTipo.textContent = tipo;
-  tooltipNodoSalientes.textContent = `${salientes.length} (flujo: ${flujoSaliente})`;
-  tooltipNodoEntrantes.textContent = `${entrantes.length} (flujo: ${flujoEntrante})`;
-  tooltipNodoFlujo.textContent = flujoSaliente - flujoEntrante;
-
-  nodoTooltip.style.display = 'block';
-
-  const tooltipRect = nodoTooltip.getBoundingClientRect();
-  let left = eventoMouse.clientX + 16;
-  let top = eventoMouse.clientY - 10;
-
-  if (left + tooltipRect.width > window.innerWidth) {
-    left = eventoMouse.clientX - tooltipRect.width - 16;
-  }
-  if (top + tooltipRect.height > window.innerHeight) {
-    top = window.innerHeight - tooltipRect.height - 10;
-  }
-
-  nodoTooltip.style.left = left + 'px';
-  nodoTooltip.style.top = top + 'px';
-}
-
-function ocultarTooltipNodo() {
-  nodoTooltip.style.display = 'none';
-}
-
-// DRAG & DROP DE NODOS
-let nodoDragIndex = null;
-let isDragging = false;
-let dragStartPos = null;
-
-function getSVGPoint(evt) {
-  const svgEl = document.getElementById('svg-red');
-  const pt = svgEl.createSVGPoint();
-  const ctm = svgEl.getScreenCTM().inverse();
-  pt.x = evt.clientX;
-  pt.y = evt.clientY;
-  return pt.matrixTransform(ctm);
-}
-
-svgRed.addEventListener('mousedown', (e) => {
-  const nodoEl = e.target.closest('.nodo');
-  if (!nodoEl) return;
-  const id = parseInt(nodoEl.id.replace('nodo-', ''));
-  nodoDragIndex = id - 1;
-  isDragging = false;
-  dragStartPos = { x: e.clientX, y: e.clientY };
-  nodoEl.classList.add('nodo-dragging');
-  e.preventDefault();
-});
-
-document.addEventListener('mousemove', (e) => {
-  if (nodoDragIndex === null) return;
-
-  if (!isDragging && dragStartPos) {
-    const dx = Math.abs(e.clientX - dragStartPos.x);
-    const dy = Math.abs(e.clientY - dragStartPos.y);
-    if (dx > 4 || dy > 4) {
-      isDragging = true;
-    }
-  }
-
-  if (!isDragging) return;
-
-  const svgPoint = getSVGPoint(e);
-  posicionesNodos[nodoDragIndex].x = Math.max(25, Math.min(575, svgPoint.x));
-  posicionesNodos[nodoDragIndex].y = Math.max(25, Math.min(575, svgPoint.y));
-  dibujarRed();
-
-  const nodoEl = document.getElementById(`nodo-${nodoDragIndex + 1}`);
-  if (nodoEl) nodoEl.classList.add('nodo-dragging');
-
-  ocultarTooltipNodo();
-});
-
-document.addEventListener('mouseup', (e) => {
-  if (nodoDragIndex !== null) {
-    const nodoEl = document.getElementById(`nodo-${nodoDragIndex + 1}`);
-    if (nodoEl) nodoEl.classList.remove('nodo-dragging');
-    nodoDragIndex = null;
-    isDragging = false;
-    dragStartPos = null;
-  }
-});
-
-// HISTORIAL INTERACTIVO
-const seccionHistorial = document.getElementById('seccion-historial');
-const historialInteractivo = document.getElementById('historial-interactivo');
-const btnReplayTodo = document.getElementById('btn-replay-todo');
-
-function actualizarHistorialInteractivo() {
-  if (historialRecorridos.length === 0) {
-    seccionHistorial.style.display = 'none';
-    return;
-  }
-
-  seccionHistorial.style.display = 'flex';
-  historialInteractivo.innerHTML = '';
-
-  historialRecorridos.forEach((rec, idx) => {
-    const item = document.createElement('div');
-    item.className = 'historial-item';
-    item.innerHTML = `
-      <span class="historial-num">${idx + 1}</span>
-      <div class="historial-detalle">
-        <span class="historial-camino">${rec.camino}</span>
-        <span class="historial-capacidad">+${rec.capacidad} unidades de flujo</span>
-      </div>
-      <button class="btn historial-replay-btn" title="Reproducir este camino">▶</button>
-    `;
-
-    item.addEventListener('mouseenter', () => {
-      const nodos = rec.camino.split(' -> ').map(Number);
-      highlightNodosEnSVG(nodos);
-      item.classList.add('historial-active');
-    });
-
-    item.addEventListener('mouseleave', () => {
-      clearHighlightNodos();
-      item.classList.remove('historial-active');
-    });
-
-    const replayBtn = item.querySelector('.historial-replay-btn');
-    replayBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const nodos = rec.camino.split(' -> ').map(Number);
-      replayPath(nodos);
-    });
-
-    historialInteractivo.appendChild(item);
-  });
-
-  btnReplayTodo.disabled = historialRecorridos.length === 0;
-}
-
-function highlightNodosEnSVG(nodos) {
-  nodos.forEach(idNodo => {
-    const el = document.getElementById(`nodo-${idNodo}`);
-    if (el) {
-      const circulo = el.querySelector('circle');
-      if (circulo) circulo.setAttribute('fill', COLOR_MORADO);
-    }
-  });
-}
-
-function clearHighlightNodos() {
-  dibujarRed();
-}
-
-async function replayPath(nodos) {
-  caminoSeleccionado = [];
-  dibujarRed();
-
-  for (let i = 0; i < nodos.length; i++) {
-    caminoSeleccionado.push(nodos[i]);
-    dibujarRed();
-    await sleep(400);
-  }
-
-  mostrarToast(`Camino ${nodos.join(' → ')} reproducido`, 'info');
-
-  setTimeout(() => {
-    caminoSeleccionado = [];
-    dibujarRed();
-  }, 1500);
-}
-
-async function replayTodo() {
-  btnReplayTodo.disabled = true;
-  mostrarToast('Reproduciendo todos los caminos...', 'info');
-
-  for (let i = 0; i < historialRecorridos.length; i++) {
-    const nodos = historialRecorridos[i].camino.split(' -> ').map(Number);
-    await replayPath(nodos);
-    await sleep(600);
-  }
-
-  btnReplayTodo.disabled = false;
-  mostrarToast('Replay completo finalizado', 'exito');
-}
-
-btnReplayTodo.addEventListener('click', replayTodo);
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// LEYENDA INTERACTIVA
-document.querySelectorAll('.leyenda-item').forEach(item => {
-  item.addEventListener('mouseenter', () => {
-    item.classList.add('leyenda-highlight');
-  });
-  item.addEventListener('mouseleave', () => {
-    item.classList.remove('leyenda-highlight');
-  });
-});
-
-// HOOKS
-const _originalDibujarRed = dibujarRed;
-
 const observerNodos = new MutationObserver(() => {
   document.querySelectorAll('.nodo').forEach(nodoEl => {
-    nodoEl.addEventListener('mouseenter', (e) => {
-      if (isDragging) return;
-      const id = parseInt(nodoEl.id.replace('nodo-', ''));
-      mostrarTooltipNodo(id, e);
-    });
-    nodoEl.addEventListener('mousemove', (e) => {
-      if (isDragging) return;
-      const id = parseInt(nodoEl.id.replace('nodo-', ''));
-      mostrarTooltipNodo(id, e);
-    });
+    const id = nodoEl.getAttribute('data-nodo-id') || nodoEl.id.replace('nodo-', '');
+    nodoEl.addEventListener('mouseenter', (e) => { if (!isDragging) mostrarTooltipNodo(id, e); });
+    nodoEl.addEventListener('mousemove', (e) => { if (!isDragging) mostrarTooltipNodo(id, e); });
     nodoEl.addEventListener('mouseleave', ocultarTooltipNodo);
-
-    // Add clickable pulse when Ford-Fulkerson is active
-    if (seccionFord.style.display === 'flex' && !algoritmoTerminado) {
-      nodoEl.classList.add('nodo-clickable');
-    }
+    if (seccionFord.style.display === 'flex' && !algoritmoTerminado) nodoEl.classList.add('nodo-clickable');
   });
 });
 
 observerNodos.observe(grupoNodos, { childList: true });
 
-// Hook into conectarArista for toast
-const _originalConectarArista = conectarArista;
-
-// Override the click handler's wrapper
-btnConectar.removeEventListener('click', _originalConectarArista);
-btnConectar.addEventListener('click', () => {
-  const prevLen = aristas.length;
-  conectarArista();
-  if (aristas.length > prevLen) {
-    const a = aristas[aristas.length - 1];
-    mostrarToast(`Arista ${a.origen} → ${a.destino} (cap: ${a.peso}) añadida`, 'exito');
-  }
-});
-
-// Hook into generarAristasAleatorias for toast
-btnAleatorio.removeEventListener('click', generarAristasAleatorias);
-btnAleatorio.addEventListener('click', () => {
-  generarAristasAleatorias();
-  mostrarToast(`${aristas.length} aristas generadas aleatoriamente`, 'info');
-});
-
-// Hook into aplicarFuenteSumidero for toast and historial
-const _originalAplicarFuenteSumidero = aplicarFuenteSumidero;
-btnAceptarFuenteSumidero.removeEventListener('click', _originalAplicarFuenteSumidero);
-btnAceptarFuenteSumidero.addEventListener('click', () => {
-  const prevDisplay = seccionFord.style.display;
-  aplicarFuenteSumidero();
-  if (seccionFord.style.display === 'flex' && prevDisplay !== 'flex') {
-    mostrarToast(`Fuente: ${nodoFuente}, Sumidero: ${nodoSumidero} configurados`, 'exito');
-  }
-  actualizarHistorialInteractivo();
-});
-
-// Hook into confirmarCapacidad for toast and historial update
-const _originalConfirmarCapacidad = confirmarCapacidad;
-btnConfirmarCapacidad.removeEventListener('click', _originalConfirmarCapacidad);
-btnConfirmarCapacidad.addEventListener('click', () => {
-  const prevLen = historialRecorridos.length;
-  confirmarCapacidad();
-  if (historialRecorridos.length > prevLen) {
-    const ultimo = historialRecorridos[historialRecorridos.length - 1];
-    mostrarToast(`Camino encontrado: +${ultimo.capacidad} flujo`, 'exito');
-    actualizarHistorialInteractivo();
-  }
-  if (algoritmoTerminado) {
-    mostrarToast(`¡Flujo máximo alcanzado: ${flujoTotal}!`, 'exito', 5000);
-  }
-});
-
-// Hook into generarRed for historial reset
-const _originalGenerarRed = generarRed;
-btnAplicar.removeEventListener('click', _originalGenerarRed);
 btnAplicar.addEventListener('click', () => {
   generarRed();
-  actualizarHistorialInteractivo();
-  if (posicionesNodos.length > 0) {
-    mostrarToast(`Red generada con ${posicionesNodos.length} nodos`, 'info');
-  }
+  mostrarToast(`Red inicializada con ${numVerticesBase} vértices`, 'info');
+});
+
+btnConectar.addEventListener('click', conectarArista);
+btnAleatorio.addEventListener('click', generarAristasAleatorias);
+btnAceptarFuenteSumidero.addEventListener('click', aplicarFuenteSumidero);
+if (btnAutoCanonico) btnAutoCanonico.addEventListener('click', () => aplicarReduccionCanonica(true));
+btnVerificarCamino.addEventListener('click', verificarCamino);
+btnLimpiarCamino.addEventListener('click', limpiarSeleccionCamino);
+btnConfirmarCapacidad.addEventListener('click', confirmarCapacidad);
+
+inputFuente.addEventListener('input', () => {
+  const fVal = String(inputFuente.value || '').trim();
+  const fNodo = fVal !== '' ? obtenerNodo(fVal) : null;
+  nodoFuente = fNodo ? fNodo.id : null;
+  if (seccionFord) seccionFord.style.display = 'none';
+  if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
+  dibujarRed();
+  validarRed();
+});
+
+inputSumidero.addEventListener('input', () => {
+  const sVal = String(inputSumidero.value || '').trim();
+  const sNodo = sVal !== '' ? obtenerNodo(sVal) : null;
+  nodoSumidero = sNodo ? sNodo.id : null;
+  if (seccionFord) seccionFord.style.display = 'none';
+  if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
+  dibujarRed();
+  validarRed();
 });
 
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (tutorialOverlay.style.display === 'flex') {
-      tutorialOverlay.style.display = 'none';
-    }
+    tutorialOverlay.style.display = 'none';
+    ocultarAdvertencia();
   }
-
   if (e.ctrlKey && e.key === 'z') {
     if (caminoSeleccionado.length > 0 && seccionFord.style.display === 'flex' && !algoritmoTerminado) {
       caminoSeleccionado.pop();
       textoCamino.textContent = caminoSeleccionado.length > 0 ? caminoSeleccionado.join(' -> ') : 'Ninguno';
       btnVerificarCamino.disabled = caminoSeleccionado.length === 0;
       dibujarRed();
-      mostrarToast('Último nodo removido del camino', 'info');
       e.preventDefault();
     }
   }
+});
 
-  if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
-    const activeEl = document.activeElement;
-    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return;
-    abrirTutorial();
-  }
+window.addEventListener('DOMContentLoaded', () => {
+  generarRed();
+  generarAristasAleatorias();
 });

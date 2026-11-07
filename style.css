@@ -115,6 +115,13 @@ body {
 .botones-grupo {
   display: flex;
   gap: 8px;
+  width: 100%;
+}
+
+.botones-grupo .btn {
+  flex: 1;
+  text-align: center;
+  justify-content: center;
 }
 
 .form-group label {
@@ -859,3 +866,138 @@ svg {
 #historial-interactivo::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* =========================================
+   MÓDULO DE DIAGNÓSTICO
+   ========================================= */
+
+#seccion-diagnostico .cuadro-titulo::before {
+  background-color: #0284c7;
+}
+
+.diagnostico-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.badge-estado {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.badge-verde {
+  background-color: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+
+.badge-rojo {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.diagnostico-texto {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #334155;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.diagnostico-errores {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+}
+
+.diagnostico-errores:empty {
+  display: none;
+}
+
+.diagnostico-error-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  background-color: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fee2e2;
+}
+
+/* =========================================
+   ESTILOS DE NODOS Y ARISTAS FICTICIAS
+   ========================================= */
+
+.arista-ficticia {
+  stroke-dasharray: 6 4 !important;
+}
+
+.nodo-ficticio circle {
+  stroke-dasharray: 5 3 !important;
+  stroke-width: 2.5px !important;
+}
+
+.nodo-ficticio-fuente circle {
+  stroke: #5eead4 !important;
+  fill: #0d9488 !important;
+}
+
+.nodo-ficticio-sumidero circle {
+  stroke: #fda4af !important;
+  fill: #e11d48 !important;
+}
+
+.nodo-ficticio text {
+  font-size: 14px !important;
+  font-weight: 800 !important;
+}
+
+/* =========================================
+   CORTE MÍNIMO (S, T) EN CANVAS SVG
+   ========================================= */
+
+.linea-corte-minimo {
+  stroke: #dc2626;
+  stroke-width: 2.5;
+  stroke-dasharray: 8 6;
+  filter: drop-shadow(0 0 4px rgba(220, 38, 38, 0.4));
+  animation: fadeIn 0.4s ease;
+}
+
+.etiqueta-corte-minimo {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  fill: #dc2626;
+  letter-spacing: 0.05em;
+  text-anchor: middle;
+}
+
+.corte-minimo-detalle {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #86efac;
+  font-size: 12px;
+  line-height: 1.55;
+  color: #14532d;
+}
+
