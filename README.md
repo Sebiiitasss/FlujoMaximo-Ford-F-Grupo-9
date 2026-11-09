@@ -30,7 +30,12 @@ Ideal para estudiantes y docentes de **Investigación de Operaciones**, **Optimi
 - **🔗 Generación Aleatoria Estructurada:**
   - Construcción por capas sin cruces caóticos, garantizando que todo nodo intermedio tenga al menos una entrada y una salida, evitando atajos directos triviales desde la fuente al sumidero.
 - **🛡️ Contenedor de Diagnóstico:**
-  - Evalúa e indica de forma directa si la red es **Válida** o **Inválida**, listando puntualmente errores como falta de camino, nodos aislados o callejones sin salida.
+  - Evalúa e indica de forma directa si la red es **Válida** o **Inválida**, listando puntualmente errores como detección de ciclos dirigidos (DFS), falta de camino, nodos aislados o callejones sin salida.
+- **🚫 Prevención Estricta de Ciclos y Eliminación de Circulaciones:**
+  - **Detección con DFS (3 estados):** Identifica y rastrea la trayectoria exacta de cualquier ciclo dirigido en la red.
+  - **Bloqueo Preventivo en Modo Manual:** Impide agregar aristas dirigidas que cierren ciclos en el grafo.
+  - **Caminos Aumentantes Simples:** Restringe la selección interactiva para que ningún nodo se repita en el camino de aumento.
+  - **Cancelación de Circulaciones:** Rutina de descomposición de flujo que elimina automáticamente cualquier flujo circulante en ciclos sin alterar el flujo neto del sumidero.
 - **✂️ Cálculo y Representación Visual del Corte Mínimo:**
   - Al agotar los caminos aumentantes, determina la partición $(S, T)$ de la red residual: $S$ (alcanzables) y $T$ (no alcanzables).
   - **Línea de corte en el canvas:** Traza una línea divisoria discontinua en el SVG separando $S$ de $T$.

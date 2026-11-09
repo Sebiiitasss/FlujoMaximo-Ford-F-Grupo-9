@@ -23,6 +23,7 @@ const inputNodoInicial = document.getElementById('num-nodo-inicial');
 const inputNodoFinal = document.getElementById('num-nodo-final');
 const inputPeso = document.getElementById('num-peso');
 const btnConectar = document.getElementById('btn-conectar');
+const btnEliminarArista = document.getElementById('btn-eliminar-arista');
 
 const inputFuente = document.getElementById('num-fuente');
 const inputSumidero = document.getElementById('num-sumidero');
@@ -120,6 +121,174 @@ btnCerrarAdvertencia.addEventListener('click', ocultarAdvertencia);
 btnManual.addEventListener('click', () => {
   contenedorManual.style.display = contenedorManual.style.display === 'flex' ? 'none' : 'flex';
 });
+
+// Localiza si existe una trayectoria dirigida desde inicio hasta fin mediante búsqueda en anchura (BFS).
+function buscarCaminoDirigido(inicio, fin) {
+  const sInicio = String(inicio);
+  const sFin = String(fin);
+  if (sInicio === sFin) return [sInicio];
+
+  const parent = new Map();
+  const queue = [sInicio];
+  const visitados = new Set([sInicio]);
+
+  while (queue.length > 0) {
+    const curr = queue.shift();
+    if (curr === sFin) break;
+
+    for (const a of aristas) {
+      if (String(a.origen) === curr) {
+        const dest = String(a.destino);
+        if (!visitados.has(dest)) {
+          visitados.add(dest);
+          parent.set(dest, curr);
+          queue.push(dest);
+        }
+      }
+    }
+  }
+
+  if (!visitados.has(sFin)) return null;
+
+  const camino = [];
+  let curr = sFin;
+  while (curr !== sInicio) {
+    camino.unshift(curr);
+    curr = parent.get(curr);
+  }
+  camino.unshift(sInicio);
+  return camino;
+}
+
+// Detecta si existen ciclos dirigidos en la red mediante búsqueda en profundidad (DFS) con 3 estados.
+// Retorna la secuencia de nodos del ciclo [v1, v2, ..., vk, v1] o null si es acíclico (DAG).
+function detectarCiclosDirigidos() {
+  const adj = new Map();
+  posicionesNodos.forEach(n => adj.set(String(n.id), []));
+  aristas.forEach(a => {
+    const orig = String(a.origen);
+    const dest = String(a.destino);
+    if (!adj.has(orig)) adj.set(orig, []);
+    adj.get(orig).push(dest);
+  });
+
+  // Estados: 0 = No visitado (blanco), 1 = Visitando en rama activa (gris), 2 = Terminado (negro)
+  const estado = new Map();
+  const padre = new Map();
+  posicionesNodos.forEach(n => estado.set(String(n.id), 0));
+
+  let cicloDetectado = null;
+
+  function dfs(u) {
+    estado.set(u, 1);
+    const vecinos = adj.get(u) || [];
+    for (const v of vecinos) {
+      if (estado.get(v) === 1) {
+        // Enlace hacia atrás detectado: reconstruir el ciclo
+        const ciclo = [u];
+        let curr = u;
+        while (curr !== v && padre.has(curr)) {
+          curr = padre.get(curr);
+          ciclo.push(curr);
+        }
+        ciclo.reverse();
+        ciclo.push(v);
+        cicloDetectado = ciclo;
+        return true;
+      }
+      if (!estado.has(v) || estado.get(v) === 0) {
+        padre.set(v, u);
+        if (dfs(v)) return true;
+      }
+    }
+    estado.set(u, 2);
+    return false;
+  }
+
+  for (const n of posicionesNodos) {
+    const sId = String(n.id);
+    if (estado.get(sId) === 0) {
+      if (dfs(sId)) {
+        return cicloDetectado;
+      }
+    }
+  }
+
+  return null;
+}
+
+// Cancela flujos parásitos en ciclos (circulaciones) según el Teorema de Descomposición de Flujo.
+function cancelarCiclosDeFlujo() {
+  let huboCambio = false;
+  while (true) {
+    const aristasConFlujo = aristas.filter(a => Number(a.flujo || 0) > 0);
+    const adj = new Map();
+    aristasConFlujo.forEach(a => {
+      const orig = String(a.origen);
+      const dest = String(a.destino);
+      if (!adj.has(orig)) adj.set(orig, []);
+      adj.get(orig).push(dest);
+    });
+
+    const estado = new Map();
+    const padre = new Map();
+    let ciclo = null;
+
+    function dfs(u) {
+      estado.set(u, 1);
+      const vecinos = adj.get(u) || [];
+      for (const v of vecinos) {
+        if (estado.get(v) === 1) {
+          const c = [u];
+          let curr = u;
+          while (curr !== v && padre.has(curr)) {
+            curr = padre.get(curr);
+            c.push(curr);
+          }
+          c.reverse();
+          c.push(v);
+          ciclo = c;
+          return true;
+        }
+        if (!estado.has(v) || estado.get(v) === 0) {
+          padre.set(v, u);
+          if (dfs(v)) return true;
+        }
+      }
+      estado.set(u, 2);
+      return false;
+    }
+
+    for (const [orig] of adj) {
+      if (!estado.has(orig) || estado.get(orig) === 0) {
+        if (dfs(orig)) break;
+      }
+    }
+
+    if (!ciclo) break;
+
+    // Encontrar el cuello de botella (flujo mínimo) dentro de la circulación
+    let delta = Infinity;
+    for (let i = 0; i < ciclo.length - 1; i++) {
+      const u = ciclo[i];
+      const v = ciclo[i + 1];
+      const a = aristas.find(ed => String(ed.origen) === u && String(ed.destino) === v);
+      if (a && a.flujo < delta) delta = a.flujo;
+    }
+
+    if (delta <= 0 || delta === Infinity) break;
+
+    // Restar el flujo circulante en cada arista del ciclo
+    for (let i = 0; i < ciclo.length - 1; i++) {
+      const u = ciclo[i];
+      const v = ciclo[i + 1];
+      const a = aristas.find(ed => String(ed.origen) === u && String(ed.destino) === v);
+      if (a) a.flujo -= delta;
+    }
+    huboCambio = true;
+  }
+  return huboCambio;
+}
 
 // Calcula los grados de entrada y salida de los nodos reales para identificar fuentes y sumideros.
 function analizarGradosRedBase() {
@@ -312,6 +481,11 @@ function validarRed() {
     }
   }
 
+  const cicloDetectado = detectarCiclosDirigidos();
+  if (cicloDetectado) {
+    errores.push(`Ciclo dirigido detectado: [${cicloDetectado.join(' → ')}]. En un modelo de flujo máximo la red debe ser acíclica para garantizar la conservación de flujo y evitar circulaciones parásitas.`);
+  }
+
   const esValida = errores.length === 0;
   badgeEstadoRed.className = `badge-estado ${esValida ? 'badge-verde' : 'badge-rojo'}`;
   badgeEstadoRed.textContent = esValida ? 'Válida' : 'Inválida';
@@ -319,7 +493,9 @@ function validarRed() {
   const tieneFicticios = posicionesNodos.some(n => n.isFictitious);
   diagnosticoMensaje.textContent = esValida
     ? (tieneFicticios ? 'Red válida. Los nodos ficticios permiten calcular el flujo máximo.' : 'Red válida. Fuente/Sumidero Ficticios configurados con capacidad ∞.')
-    : 'Red inválida. La estructura actual no permite ejecutar el algoritmo de Ford-Fulkerson.';
+    : (cicloDetectado
+      ? `Red inválida. Se detectó el ciclo [${cicloDetectado.join(' → ')}]. Las redes de flujo máximo deben ser acíclicas.`
+      : 'Red inválida. La estructura actual no permite ejecutar el algoritmo de Ford-Fulkerson.');
 
   listaAlertasRed.innerHTML = errores.map(e => `<li class="diagnostico-error-item">✕ ${e}</li>`).join('');
   return { esValida, errores };
@@ -476,6 +652,12 @@ function generarAristasAleatorias() {
   if (valFlujoTotal) valFlujoTotal.textContent = '0';
   if (seccionFord) seccionFord.style.display = 'none';
 
+  const cicloGen = detectarCiclosDirigidos();
+  if (cicloGen) {
+    generarAristasAleatorias();
+    return;
+  }
+
   actualizarHistorialInteractivo();
   validarRed();
 }
@@ -550,6 +732,14 @@ function conectarArista() {
     return;
   }
 
+  // Comprobar preventivamente si agregar esta arista crearía un ciclo dirigido en la red
+  const caminoCiclo = buscarCaminoDirigido(nodoDest.id, nodoOrig.id);
+  if (caminoCiclo) {
+    const cicloStr = [...caminoCiclo, nodoDest.id].join(' → ');
+    mostrarAdvertencia(`No se puede conectar la arista ${nodoOrig.id} → ${nodoDest.id} porque generaría un ciclo dirigido en la red: [${cicloStr}]. En un modelo de flujo máximo las redes deben ser acíclicas (DAG).`, 'Ciclo No Permitido');
+    return;
+  }
+
   aristas.push({ origen: nodoOrig.id, destino: nodoDest.id, peso, flujo: 0, isFictitious: false });
   if (seccionFord) seccionFord.style.display = 'none';
   if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
@@ -557,6 +747,50 @@ function conectarArista() {
   dibujarRed();
   validarRed();
   mostrarToast(`Arista ${nodoOrig.id} → ${nodoDest.id} agregada`, 'exito');
+}
+
+// Elimina de forma interactiva la arista seleccionada en el lienzo SVG.
+function eliminarAristaInteractiva(arista) {
+  if (seccionFord && seccionFord.style.display === 'flex' && !algoritmoTerminado) {
+    mostrarAdvertencia('No puedes eliminar aristas mientras el algoritmo de Ford-Fulkerson está en ejecución.');
+    return;
+  }
+  if (arista.isFictitious) {
+    mostrarToast('Las aristas ficticias de S/T se gestionan automáticamente.', 'aviso');
+    return;
+  }
+  aristas = aristas.filter(a => a !== arista);
+  if (seccionFord) seccionFord.style.display = 'none';
+  if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
+  dibujarRed();
+  validarRed();
+  mostrarToast(`Arista ${arista.origen} → ${arista.destino} eliminada`, 'info');
+}
+
+// Elimina manualmente la arista indicada en el formulario.
+function eliminarAristaManual() {
+  const origenVal = inputNodoInicial.value.trim();
+  const destinoVal = inputNodoFinal.value.trim();
+  const nodoOrig = obtenerNodo(origenVal);
+  const nodoDest = obtenerNodo(destinoVal);
+
+  if (!nodoOrig || !nodoDest) {
+    mostrarAdvertencia('Verifica los nodos ingresados. Deben existir en la red.');
+    return;
+  }
+
+  const idx = aristas.findIndex(a => !a.isFictitious && String(a.origen) === String(nodoOrig.id) && String(a.destino) === String(nodoDest.id));
+  if (idx === -1) {
+    mostrarAdvertencia(`No existe una arista dirigida de ${nodoOrig.id} a ${nodoDest.id}.`);
+    return;
+  }
+
+  aristas.splice(idx, 1);
+  if (seccionFord) seccionFord.style.display = 'none';
+  if (grupoCorteMinimo) grupoCorteMinimo.innerHTML = '';
+  dibujarRed();
+  validarRed();
+  mostrarToast(`Arista ${nodoOrig.id} → ${nodoDest.id} eliminada`, 'info');
 }
 
 // Dibuja en el SVG los elementos visuales del grafo incluyendo nodos, aristas y etiquetas.
@@ -615,6 +849,18 @@ function dibujarRed() {
     path.setAttribute('stroke', colorInfo.hex);
     path.setAttribute('marker-start', `url(#punto-inicio-${colorInfo.nombre})`);
     path.setAttribute('marker-end', `url(#flecha-${colorInfo.nombre})`);
+
+    const tituloArista = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+    tituloArista.textContent = arista.isFictitious
+      ? `Arista ficticia: ${arista.origen} → ${arista.destino}`
+      : `Arista ${arista.origen} → ${arista.destino} (cap: ${arista.peso === Infinity ? '∞' : arista.peso}) — Clic derecho para eliminar`;
+    path.appendChild(tituloArista);
+
+    path.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      eliminarAristaInteractiva(arista);
+    });
+
     grupoAristas.appendChild(path);
 
     const textoPeso = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -723,6 +969,15 @@ function aplicarFuenteSumidero() {
   nodoFuente = nodoOrig.id;
   nodoSumidero = nodoDest.id;
 
+  const cicloDetectado = detectarCiclosDirigidos();
+  if (cicloDetectado) {
+    mostrarAdvertencia(`La red contiene el ciclo dirigido [${cicloDetectado.join(' → ')}]. En un modelo de flujo máximo las redes deben ser acíclicas. Elimina las aristas que forman el ciclo antes de iniciar Ford-Fulkerson.`, 'Ciclo Detectado');
+    seccionFord.style.display = 'none';
+    dibujarRed();
+    validarRed();
+    return;
+  }
+
   aristas.forEach(a => a.flujo = 0);
   flujoTotal = 0;
   historialRecorridos = [];
@@ -756,7 +1011,33 @@ function manejarClickNodo(idNodo) {
   if (!seccionFord || seccionFord.style.display !== 'flex') return;
   if (algoritmoTerminado) return;
   if (divPreguntaCapacidad.style.display === 'flex') return;
-  if (caminoSeleccionado.length > 0 && String(caminoSeleccionado[caminoSeleccionado.length - 1]) === String(idNodo)) return;
+
+  // Evitar repetir nodos en el camino aumentante (debe ser un camino simple sin ciclos)
+  if (caminoSeleccionado.some(id => String(id) === String(idNodo))) {
+    mostrarToast(`El nodo ${idNodo} ya está en el camino. Los caminos de aumento deben ser simples (sin ciclos).`, 'aviso');
+    return;
+  }
+
+  // Si es el primer nodo, debe coincidir con la fuente
+  if (caminoSeleccionado.length === 0) {
+    if (String(idNodo) !== String(nodoFuente)) {
+      mostrarAdvertencia(`El camino debe iniciar en el nodo Fuente (${nodoFuente}).`);
+      return;
+    }
+  } else {
+    // Si ya hay nodos, validar que exista arista dirigida desde el último nodo con capacidad residual
+    const u = caminoSeleccionado[caminoSeleccionado.length - 1];
+    const arista = aristas.find(a => String(a.origen) === String(u) && String(a.destino) === String(idNodo));
+    if (!arista) {
+      mostrarAdvertencia(`No existe arista dirigida entre ${u} y ${idNodo}.`);
+      return;
+    }
+    const residual = (arista.peso === Infinity ? Infinity : Number(arista.peso)) - Number(arista.flujo || 0);
+    if (residual <= 0) {
+      mostrarAdvertencia(`La arista ${u} → ${idNodo} no posee capacidad residual disponible.`);
+      return;
+    }
+  }
 
   caminoSeleccionado.push(idNodo);
   textoCamino.textContent = caminoSeleccionado.join(' -> ');
@@ -793,6 +1074,18 @@ function verificarCamino() {
     return;
   }
 
+  // Validar camino simple (sin nodos duplicados / ciclos)
+  const nodosVistos = new Set();
+  for (const nodo of caminoSeleccionado) {
+    const sId = String(nodo);
+    if (nodosVistos.has(sId)) {
+      mostrarAdvertencia(`El camino seleccionado contiene ciclos: el nodo ${nodo} se repite. En el algoritmo de Ford-Fulkerson los caminos aumentantes deben ser simples.`);
+      limpiarSeleccionCamino();
+      return;
+    }
+    nodosVistos.add(sId);
+  }
+
   for (let i = 0; i < caminoSeleccionado.length - 1; i++) {
     const u = caminoSeleccionado[i];
     const v = caminoSeleccionado[i + 1];
@@ -804,7 +1097,8 @@ function verificarCamino() {
       return;
     }
 
-    if (arista.peso - arista.flujo <= 0) {
+    const residual = (arista.peso === Infinity ? Infinity : Number(arista.peso)) - Number(arista.flujo || 0);
+    if (residual <= 0) {
       mostrarAdvertencia(`La arista ${u} → ${v} no posee capacidad residual.`);
       limpiarSeleccionCamino();
       return;
@@ -827,7 +1121,7 @@ function confirmarCapacidad() {
     const u = caminoSeleccionado[i];
     const v = caminoSeleccionado[i + 1];
     const arista = aristas.find(a => String(a.origen) === String(u) && String(a.destino) === String(v));
-    const residual = arista.peso - arista.flujo;
+    const residual = (arista.peso === Infinity ? Infinity : Number(arista.peso)) - Number(arista.flujo || 0);
     if (residual < cuelloBotella) cuelloBotella = residual;
   }
 
@@ -840,8 +1134,11 @@ function confirmarCapacidad() {
     const u = caminoSeleccionado[i];
     const v = caminoSeleccionado[i + 1];
     const arista = aristas.find(a => String(a.origen) === String(u) && String(a.destino) === String(v));
-    arista.flujo += cuelloBotella;
+    arista.flujo = Number(arista.flujo || 0) + cuelloBotella;
   }
+
+  // Cancelar automáticamente cualquier circulación o ciclo de flujo parásito
+  cancelarCiclosDeFlujo();
 
   flujoTotal += cuelloBotella;
   historialRecorridos.push({ camino: caminoSeleccionado.join(' -> '), capacidad: cuelloBotella });
@@ -1151,8 +1448,9 @@ function mostrarToast(mensaje, tipo = 'info', duracion = 3000) {
 const pasosTutorial = [
   { titulo: 'Simulador de Flujo Máximo', contenido: 'Modela redes dirigidas y resuelve el problema de Flujo Máximo con Ford-Fulkerson y el Teorema del Corte Mínimo.' },
   { titulo: 'Vértices y Layout Horizontal', contenido: 'Configura la cantidad de nodos y presiona "Aleatorio" para generar una red por niveles de izquierda a derecha sin atajos directos.' },
+  { titulo: 'Gestión y Eliminación Fácil de Aristas', contenido: 'Conecta nodos desde el panel manual o elimínalos al instante haciendo clic derecho sobre cualquier arista en el lienzo (o con el botón "Eliminar"). Además, el sistema previene la formación de ciclos dirigidos.' },
   { titulo: 'Fuentes y Sumideros Ficticios', contenido: 'Si hay múltiples fuentes o sumideros, el sistema crea automáticamente extremos ficticios (S y T) con capacidad infinita (∞).' },
-  { titulo: 'Diagnóstico en Tiempo Real', contenido: 'El contenedor de Diagnóstico valida de inmediato si la red es Válida o lista puntualmente errores como callejones o falta de caminos.' },
+  { titulo: 'Diagnóstico y Validación de Ciclos', contenido: 'El panel de Diagnóstico valida que la red sea acíclica (sin ciclos dirigidos mediante DFS), sin callejones ni nodos aislados, asegurando caminos aumentantes simples.' },
   { titulo: 'Corte Mínimo (S, T)', contenido: 'Al agotar los caminos aumentantes, el simulador traza la línea divisoria del Corte Mínimo y verifica formalmente que |f| = c(S, T).' }
 ];
 
@@ -1213,6 +1511,7 @@ btnAplicar.addEventListener('click', () => {
 });
 
 btnConectar.addEventListener('click', conectarArista);
+if (btnEliminarArista) btnEliminarArista.addEventListener('click', eliminarAristaManual);
 btnAleatorio.addEventListener('click', generarAristasAleatorias);
 btnAceptarFuenteSumidero.addEventListener('click', aplicarFuenteSumidero);
 if (btnAutoCanonico) btnAutoCanonico.addEventListener('click', () => aplicarReduccionCanonica(true));
@@ -1244,6 +1543,13 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     tutorialOverlay.style.display = 'none';
     ocultarAdvertencia();
+  }
+  if (e.key === '?' && !e.ctrlKey && !e.metaKey) {
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return;
+    pasoActualTutorial = 0;
+    actualizarTutorial();
+    tutorialOverlay.style.display = 'flex';
   }
   if (e.ctrlKey && e.key === 'z') {
     if (caminoSeleccionado.length > 0 && seccionFord.style.display === 'flex' && !algoritmoTerminado) {
